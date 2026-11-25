@@ -2,25 +2,57 @@
 import { computed, ref, watchEffect } from "vue";
 import { useGettext } from "vue3-gettext";
 
-import Button from "primevue/button";
+import Button from "openvue/button";
 
-import { getGraphs } from "@/arches_search/AdvancedSearch/api.ts";
 import { useSearchFilters } from "@/arches_search/SimpleSearch/composables/useSearchFilters.ts";
 
-import type { GraphModel } from "@/arches_search/AdvancedSearch/types.ts";
 import type { ResourceType } from "@/arches_search/SimpleSearch/types.ts";
 
 const RESOURCE_TYPE_FALLBACK_KEY = "__all__";
 
-const { $gettext } = useGettext();
-const { setGraph, activeGraph } = useSearchFilters();
+const { $gettext, current } = useGettext();
+const {
+    toggleGraph,
+    activeGraphs,
+    availableGraphs,
+    loadAvailableGraphs,
+    searchResults,
+} = useSearchFilters();
 
-const resourceTypes = ref<ResourceType[]>([]);
 const hasResourceTypeLoadError = ref(false);
+
+const compactCountFormatter = computed(
+    () => new Intl.NumberFormat(current, { notation: "compact" }),
+);
+const fullCountFormatter = computed(() => new Intl.NumberFormat(current));
 
 const resourceTypeLoadErrorMessage = computed(() =>
     $gettext("Resource type filters are unavailable."),
 );
+
+const allResourceType = computed<ResourceType>(() => ({
+    id: null,
+    slug: "",
+    label: $gettext("All"),
+    icon: "",
+}));
+
+const displayedResourceTypes = computed<ResourceType[]>(() => [
+    allResourceType.value,
+    ...availableGraphs.value,
+]);
+
+const resourceTypeCountsByGraphId = computed<Map<string, number>>(() => {
+    const countsByGraphId = new Map<string, number>();
+    for (const resourceTypeCount of searchResults.value.resource_type_counts ??
+        []) {
+        countsByGraphId.set(
+            resourceTypeCount.graph_id,
+            resourceTypeCount.count,
+        );
+    }
+    return countsByGraphId;
+});
 
 watchEffect(async () => {
     await loadResourceTypes();
@@ -29,18 +61,9 @@ watchEffect(async () => {
 async function loadResourceTypes(): Promise<void> {
     try {
         hasResourceTypeLoadError.value = false;
-
-        const graphs: GraphModel[] = await getGraphs();
-        resourceTypes.value = graphs
-            .filter((graph) => graph.isresource && graph.is_active)
-            .map((graph) => ({
-                id: graph.graphid,
-                label: graph.name,
-                icon: graph.iconclass,
-            }));
+        await loadAvailableGraphs();
     } catch (error) {
         console.error(error);
-        resourceTypes.value = [];
         hasResourceTypeLoadError.value = true;
     }
 }
@@ -50,36 +73,81 @@ function getResourceTypeButtonKey(resourceType: ResourceType): string {
 }
 
 function isResourceTypeSelected(resourceType: ResourceType): boolean {
-    return activeGraph.value?.id === resourceType.id;
-}
-
-function selectGraph(graph: ResourceType | null): void {
-    if (activeGraph.value?.id === graph?.id) {
-        setGraph(null);
-
-        return;
+    if (resourceType.id === null) {
+        return activeGraphs.value.length === 0;
     }
 
-    setGraph(graph);
+    return activeGraphs.value.some((graph) => graph.id === resourceType.id);
+}
+
+function selectGraph(resourceType: ResourceType): void {
+    toggleGraph(resourceType);
+}
+
+function getResourceTypeCount(resourceType: ResourceType): number | null {
+    // Only what the search returned is counted: "All" while it is selected, and
+    // each resource type the search included.
+    if (resourceType.id === null) {
+        return isResourceTypeSelected(resourceType)
+            ? searchResults.value.pagination.total_results
+            : null;
+    }
+
+    return resourceTypeCountsByGraphId.value.get(resourceType.id) ?? null;
+}
+
+function hasResourceTypeCount(resourceType: ResourceType): boolean {
+    return getResourceTypeCount(resourceType) !== null;
+}
+
+function getResourceTypeCountDisplay(resourceType: ResourceType): string {
+    return $gettext("(%{count})", {
+        count: compactCountFormatter.value.format(
+            getResourceTypeCount(resourceType) ?? 0,
+        ),
+    });
+}
+
+function getResourceTypeTooltip(resourceType: ResourceType): string {
+    const count = getResourceTypeCount(resourceType);
+    if (count === null) {
+        return resourceType.label;
+    }
+
+    return $gettext("%{label} — %{count} records", {
+        label: resourceType.label,
+        count: fullCountFormatter.value.format(count),
+    });
 }
 </script>
 
 <template>
     <div class="resource-type-filter">
         <Button
-            v-for="resourceType in resourceTypes"
+            v-for="resourceType in displayedResourceTypes"
             :key="getResourceTypeButtonKey(resourceType)"
             class="type-btn"
-            icon-pos="left"
             severity="secondary"
             size="large"
             type="button"
             variant="outlined"
             :class="{ active: isResourceTypeSelected(resourceType) }"
-            :icon="resourceType.icon"
-            :label="resourceType.label"
+            :title="getResourceTypeTooltip(resourceType)"
             @click="selectGraph(resourceType)"
-        />
+        >
+            <i
+                v-if="resourceType.icon"
+                class="type-icon"
+                :class="resourceType.icon"
+            />
+            <span class="type-label">{{ resourceType.label }}</span>
+            <span
+                v-if="hasResourceTypeCount(resourceType)"
+                class="type-count"
+            >
+                {{ getResourceTypeCountDisplay(resourceType) }}
+            </span>
+        </Button>
 
         <span
             v-if="hasResourceTypeLoadError"
@@ -95,21 +163,65 @@ function selectGraph(graph: ResourceType | null): void {
 <style scoped>
 .resource-type-filter {
     display: flex;
-    flex-wrap: wrap;
-    gap: 0.4rem;
-    padding: 0.8rem 1.6rem;
-    background-color: var(--p-content-background);
-    border-bottom: 0.125rem solid var(--p-content-border-color);
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.2rem 1.6rem 1.4rem;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+.resource-type-filter::-webkit-scrollbar {
+    display: none;
 }
 
 .resource-type-filter .type-btn {
-    font-size: var(--p-arches-search-font-size);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    gap: 0.5rem;
+    padding: 0.7rem 1.2rem;
+    border: 0.15rem solid var(--arches-search-chip-border);
+    border-radius: var(--arches-search-radius-pill);
+    background: var(--p-content-background);
+    color: var(--arches-search-sec-btn-text);
+    font-size: 1.2rem;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+    transition:
+        background 0.12s,
+        border-color 0.12s,
+        color 0.12s;
 }
 
-.resource-type-filter .type-btn.active,
-.resource-type-filter .type-btn.active:hover,
-.resource-type-filter .p-button-outlined.p-button-secondary.type-btn:hover {
-    background-color: var(--p-button-primary-background);
+.resource-type-filter .type-btn:hover {
+    background: var(--p-content-hover-background);
+    border: 0.15rem solid var(--p-text-muted-color);
+    color: var(--arches-search-sec-btn-text);
+}
+
+.resource-type-filter .type-btn.active {
+    background: var(--p-primary-color);
+    border-color: var(--p-primary-color);
+    color: var(--p-primary-contrast-color);
+}
+
+.resource-type-filter .type-btn.active:hover {
+    background: var(--p-primary-color);
+    border: 0.15rem solid var(--p-primary-color);
+    color: var(--p-primary-contrast-color);
+}
+
+.resource-type-filter .type-btn .type-icon {
+    font-size: 1.1rem;
+}
+
+.resource-type-filter .type-btn .type-count {
+    margin-inline-start: 0.1rem;
+    font-size: 1rem;
+    font-weight: 500;
 }
 
 .resource-type-filter .load-error {

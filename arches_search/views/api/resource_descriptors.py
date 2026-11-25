@@ -29,15 +29,14 @@ class ResourceDescriptorsAPI(APIBase):
     def get(self, request):
         ids = request.GET.getlist("ids")
         instances = ResourceInstance.objects.filter(resourceinstanceid__in=ids).only(
-            "resourceinstanceid", "descriptors", "graph_id"
+            "resourceinstanceid", "descriptors", "graph_id", "principaluser_id"
         )
-        return JSONResponse(
-            {
-                str(r.resourceinstanceid): {
-                    "descriptors": r.descriptors or {},
-                    "graph_id": str(r.graph_id),
-                }
-                for r in instances
-                if user_can_read_resource(user=request.user, resource=r)
+        response = {}
+        for r in instances:
+            if not user_can_read_resource(user=request.user, resource=r):
+                continue
+            response[str(r.resourceinstanceid)] = {
+                "descriptors": r.descriptors or {},
+                "graph_id": str(r.graph_id),
             }
-        )
+        return JSONResponse(response)

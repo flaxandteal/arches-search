@@ -1,27 +1,51 @@
 import type { GroupPayload } from "@/arches_search/AdvancedSearch/types.ts";
+import type { FeatureCollection } from "geojson";
 
 export interface ResourceType {
     id: string | null; // graph id; null = "all types"
+    slug: string;
     label: string;
     icon: string;
+    description?: string;
 }
 
 // Serializable snapshot of every piece of state that defines a search.
 // Anything that should round-trip through "save / load search" must live
-// here — and therefore on `useSearchFilters`. Bump `version` when the
-// shape changes so old saved rows can be migrated.
+// here — and therefore on `useSearchFilters`.
 export interface SearchDefinition {
-    version: 1;
     terms: SerializedTerm[];
     queries: Record<string, GroupPayload>;
-    graphId: string | null;
+    graphSlugs: string[];
+    mapFilter: FeatureCollection | null;
+    sort: SortSpec[];
+    includeRelated: boolean;
 }
+
+export const TIME_FILTER_QUERY_KEY = "timeFilter";
+// The advanced query block is stored in `queries` under this key, beside the
+// keys Simple Search's own filters use.
+export const ADVANCED_QUERY_KEY = "advancedQuery";
+
+export const TERM_KIND_CONTROLLED_TERM = "controlled-term";
+export const TERM_KIND_RECORD = "record";
+
+export type TermKind =
+    | typeof TERM_KIND_CONTROLLED_TERM
+    | typeof TERM_KIND_RECORD;
 
 export interface SerializedTerm {
     id: string;
     text: string;
     inverted: boolean;
+    termKind?: TermKind;
+    icon?: string;
     options?: Record<string, unknown>;
+}
+
+export interface SearchRequestTerm {
+    type: "string" | typeof TERM_KIND_CONTROLLED_TERM;
+    text: string;
+    inverted: boolean;
 }
 
 export interface TermSuggestion {
@@ -29,15 +53,56 @@ export interface TermSuggestion {
     datatype: string;
     text: string;
     addtional_info?: Record<string, unknown>;
+    resourceinstanceid?: string;
+    graph_icon?: string;
+    graph_name?: string;
 }
+
+export const TERM_FILTER_KEY = "termfilter";
+
+export const ACTIVE_FILTER_KIND_TERM = "term";
+export const ACTIVE_FILTER_KIND_RESOURCE_TYPE = "resource-type";
+export const ACTIVE_FILTER_KIND_TIME = "time";
+export const ACTIVE_FILTER_KIND_MAP = "map";
+export const ACTIVE_FILTER_KIND_ATTRIBUTE = "attribute";
+
+export type ActiveFilterKind =
+    | typeof ACTIVE_FILTER_KIND_TERM
+    | typeof TERM_KIND_CONTROLLED_TERM
+    | typeof TERM_KIND_RECORD
+    | typeof ACTIVE_FILTER_KIND_RESOURCE_TYPE
+    | typeof ACTIVE_FILTER_KIND_TIME
+    | typeof ACTIVE_FILTER_KIND_MAP
+    | typeof ACTIVE_FILTER_KIND_ATTRIBUTE;
 
 export interface ActiveFilter {
     id: string;
     text: string;
     clear: () => void;
     inverted: boolean;
+    kind: ActiveFilterKind;
+    category: string;
+    icon: string;
+    onEdit?: () => void;
     options?: Record<string, unknown>;
+    // Set when the filter is kept but not sent with the search; says why.
+    inactiveNote?: string;
 }
+
+export const RESULTS_SORT_RELEVANCE = "relevance";
+export const RESULTS_SORT_NAME = "name";
+export const RESULTS_SORT_CREATED_TIME = "createdTime";
+export const RESULTS_SORT_NODE_PREFIX = "node:";
+
+export type ResultsSortDirection = "asc" | "desc";
+
+export type NodeSortField = `${string}${string}`;
+
+export type ResultsSortField =
+    | typeof RESULTS_SORT_RELEVANCE
+    | typeof RESULTS_SORT_NAME
+    | typeof RESULTS_SORT_CREATED_TIME
+    | NodeSortField;
 
 export interface SortOption {
     label: string;
@@ -59,22 +124,53 @@ export interface NodeFilterConfigNode {
     datatype: string;
     config: Record<string, unknown> | null;
     sortorder: number;
+    filterable: boolean;
+    sortable: boolean;
 }
 
-export type SortDirection = "asc" | "desc";
+export type SortSpec =
+    | { type: "primary_name"; direction: ResultsSortDirection }
+    | { type: "created_time"; direction: ResultsSortDirection }
+    | { type: "RESOURCE_FIELD"; field: string; direction: ResultsSortDirection }
+    | {
+          type: "NODE";
+          graph_slug: string;
+          node_alias: string;
+          direction: ResultsSortDirection;
+      };
 
-export type SortSpec = { type: "primary_name"; direction: SortDirection };
+export type ResourceFieldKind =
+    | "USER"
+    | "CHOICE"
+    | "BOOLEAN"
+    | "DATE"
+    | "ID"
+    | "TEXT";
 
-export interface AttributeFilterOption {
-    id: string;
+export interface ResourceFieldChoice {
+    value: string;
     label: string;
-    count?: number;
 }
 
-export interface AttributeFilterSection {
-    id: string;
+export interface ResourceFieldMetadata {
+    field: string;
     label: string;
-    options: AttributeFilterOption[];
+    kind: ResourceFieldKind;
+    operators: string[];
+    is_groupable: boolean;
+    is_user_relation: boolean;
+    choices?: ResourceFieldChoice[];
+}
+
+export interface DateRangeFilter {
+    from: string;
+    to: string;
+}
+
+export interface ResourceFieldFilter {
+    field: string;
+    operator: string;
+    operands?: unknown[];
 }
 
 export interface SavedSearch {
@@ -88,3 +184,30 @@ export interface SavedSearch {
         username: string;
     };
 }
+
+export const EXPORT_FORMAT_BRANCH_EXCEL = "branch-excel";
+export const EXPORT_FORMAT_TILE_EXCEL = "tile-excel";
+
+export type ExportFormat =
+    | typeof EXPORT_FORMAT_BRANCH_EXCEL
+    | typeof EXPORT_FORMAT_TILE_EXCEL;
+
+export const EXPORT_CONCEPTS_AS_LABELS = "labels";
+export const EXPORT_CONCEPTS_AS_UUIDS = "uuids";
+
+export type ExportConceptsAs =
+    | typeof EXPORT_CONCEPTS_AS_LABELS
+    | typeof EXPORT_CONCEPTS_AS_UUIDS;
+
+export interface ExportRequest {
+    format: ExportFormat;
+    filename: string;
+    exportConceptsAs: ExportConceptsAs;
+}
+
+export const EXPORT_STATE_IDLE = "idle";
+export const EXPORT_STATE_PENDING = "pending";
+
+export type ExportState =
+    | typeof EXPORT_STATE_IDLE
+    | typeof EXPORT_STATE_PENDING;

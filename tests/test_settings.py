@@ -51,6 +51,9 @@ DATABASES = {
     }
 }
 
+
+PERMISSION_FRAMEWORK = "arches_default_deny.ArchesDefaultDenyPermissionFramework"
+
 CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.dummy.DummyCache",
@@ -58,6 +61,14 @@ CACHES = {
     "user_permission": {
         "BACKEND": "django.core.cache.backends.dummy.DummyCache",
         "LOCATION": "user_permission_cache",
+    },
+    "querysets_concepts": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "querysets_concepts_cache",
+    },
+    "querysets_resource_instances": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "querysets_resource_instances_cache",
     },
 }
 

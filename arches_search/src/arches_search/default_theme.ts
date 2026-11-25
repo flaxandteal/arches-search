@@ -1,41 +1,237 @@
-import { definePreset } from "@primeuix/themes";
-import Aura from "@primeuix/themes/aura";
+import { definePreset, palette } from "@openvue/themes";
+// eslint-disable-next-line
+// @ts-ignore: This is a workaround for OpenVue theme import issues after v1.20
+import Aura from "@openvue/themes/aura";
 
 import { compileGlobalCss } from "@/arches_modular_reports/utils.ts";
 
+const ARCHES_SEARCH_TEAL = "#0d9488";
+
 const cssOverrides = {
-    // examples of how to override styles in modular report components
-    // ".section-table-header h4": {
-    //     padding: "0 2rem !important",
-    //     "font-size": "1.5rem !important",
-    // },
-    // ".linked-section-container": {
-    //     margin: "0 1.5rem !important",
-    // },
-    // ".linked-section-container .p-panel-header h3": {
-    //     "font-size": "2.5rem !important",
-    // },
-    // ".linked-section-button-container .p-button-label": {
-    //     color: "#1857e5",
-    // },
-    // ".p-card-content h2": {
-    //     "font-size": "3rem !important",
-    // },
-    // ".node-container strong": {
-    //     "font-size": "1.7rem !important",
-    // },
-    // "button.p-tab": {
-    //     "font-size": "1.6rem !important",
-    // },
-    // ".p-tabpanels": {
-    //     "background-color": "#e9ebed",
-    // },
-    // ".data-container": {
-    //     border: "0",
-    //     margin: "0 4.5rem 3rem !important",
-    //     "grid-template-columns": "repeat(4, 1fr) !important",
-    // },
+    ":root": {
+        "--arches-search-radius-pill": "10rem",
+
+        "--arches-search-page-bg": "#f6f7f9",
+        "--arches-search-card-bg": "#ffffff",
+
+        "--arches-search-chip-search-bg": "#f1f5f9",
+        "--arches-search-chip-search-border": "#cbd5e1",
+        "--arches-search-chip-search-text": "#334155",
+
+        "--arches-search-highlight-bg": "#e0f2fe",
+        "--arches-search-highlight-text": "#0369a1",
+
+        "--arches-search-live-bg": "#dcfce7",
+        "--arches-search-live-text": "#15803d",
+
+        "--arches-search-filter-resource-type-bg": "#ccfbf1",
+        "--arches-search-filter-resource-type-border": "#5eead4",
+        "--arches-search-filter-resource-type-text": "#0f766e",
+
+        "--arches-search-filter-time-bg": "#fef3c7",
+        "--arches-search-filter-time-border": "#fcd34d",
+        "--arches-search-filter-time-text": "#92400e",
+
+        "--arches-search-filter-map-bg": "#eff6ff",
+        "--arches-search-filter-map-border": "#93c5fd",
+        "--arches-search-filter-map-text": "#1d4ed8",
+
+        "--arches-search-filter-attribute-bg": "#f5f3ff",
+        "--arches-search-filter-attribute-border": "#c4b5fd",
+        "--arches-search-filter-attribute-text": "#5b21b6",
+
+        "--arches-search-filter-controlled-term-bg": "#f5f3ff",
+        "--arches-search-filter-controlled-term-border": "#c4b5fd",
+        "--arches-search-filter-controlled-term-text": "#5b21b6",
+
+        "--arches-search-filter-record-bg": "#f0fdf4",
+        "--arches-search-filter-record-border": "#86efac",
+        "--arches-search-filter-record-text": "#15803d",
+
+        "--arches-search-filter-related-bg": "#fff7ed",
+        "--arches-search-filter-related-text": "#c2410c",
+
+        "--arches-search-sec-btn-hover-bg": "#e2e8f0",
+        "--arches-search-sec-btn-text": "#475569",
+        "--arches-search-chip-border": "#cbd5e1",
+
+        "--arches-search-card-border": "#e2e8f0",
+        "--arches-search-card-shadow":
+            "0 0.1rem 0.3rem rgba(0, 0, 0, 0.06), 0 0.1rem 0.2rem rgba(0, 0, 0, 0.04)",
+        "--arches-search-card-shadow-hover": "0 0.6rem 2rem rgba(0, 0, 0, 0.1)",
+        "--arches-search-item-hover-shadow":
+            "0 0.1rem 0.3rem rgba(0, 0, 0, 0.08)",
+        "--arches-search-chip-hover-shadow": "0 0 0 0.2rem rgba(0, 0, 0, 0.08)",
+        "--arches-search-overlay-shadow":
+            "0 0.8rem 2.4rem rgba(0, 0, 0, 0.12), 0 0.2rem 0.6rem rgba(0, 0, 0, 0.07)",
+        "--arches-search-floating-header-shadow":
+            "0 0.4rem 1.6rem rgba(0, 0, 0, 0.16)",
+        "--arches-search-map-panel-shadow":
+            "-0.4rem 0 1.6rem rgba(0, 0, 0, 0.2)",
+        "--arches-search-typeahead-overlay-max-width": "48rem",
+        "--arches-search-primary-muted-bg": "rgba(13, 148, 136, 0.1)",
+
+        "--arches-search-model-card-radius": "0.4rem",
+        "--arches-search-model-icon-radius": "0.9rem",
+        "--arches-search-model-icon-text": "#ffffff",
+        "--arches-search-model-icon-color-1": "#f97316",
+        "--arches-search-model-icon-color-2": "#06b6d4",
+        "--arches-search-model-icon-color-3": "#8b5cf6",
+        "--arches-search-model-icon-color-4": "#ec4899",
+        "--arches-search-model-icon-color-5": "#f59e0b",
+        "--arches-search-model-icon-color-6": "#0d9488",
+        "--arches-search-model-icon-color-7": "#6366f1",
+        "--arches-search-model-icon-color-8": "#84cc16",
+
+        "--arches-search-hero-gradient":
+            "linear-gradient(145deg, #0c1520 0%, #162032 45%, #1a2e3a 75%, #0e2a27 100%)",
+        "--arches-search-hero-dot-grid":
+            "radial-gradient(rgba(255, 255, 255, 0.055) 0.1rem, transparent 0.1rem)",
+        "--arches-search-hero-dot-grid-size": "3.2rem 3.2rem",
+        "--arches-search-hero-glow":
+            "radial-gradient(circle, rgba(13, 148, 136, 0.22) 0%, transparent 65%)",
+        "--arches-search-hero-glow-size": "48rem",
+        "--arches-search-hero-glow-offset": "-8rem",
+        "--arches-search-hero-eyebrow-bg": "rgba(13, 148, 136, 0.18)",
+        "--arches-search-hero-eyebrow-border": "rgba(13, 148, 136, 0.35)",
+        "--arches-search-hero-eyebrow-text": "#5eead4",
+        "--arches-search-hero-title-text": "#ffffff",
+        "--arches-search-hero-subtitle-text": "rgba(255, 255, 255, 0.56)",
+        "--arches-search-hero-search-bg": "rgba(255, 255, 255, 0.97)",
+        "--arches-search-hero-search-radius": "3.6rem",
+        "--arches-search-hero-search-shadow":
+            "0 1.2rem 4rem rgba(0, 0, 0, 0.3), 0 0 0 0.1rem rgba(255, 255, 255, 0.2)",
+        "--arches-search-hero-search-btn-font-size": "1.4rem",
+        "--arches-search-hero-search-btn-font-weight": "600",
+        "--arches-search-hero-hint-text": "rgba(255, 255, 255, 0.44)",
+        "--arches-search-hero-hint-text-hover": "rgba(255, 255, 255, 0.78)",
+        "--arches-search-hero-link-text": "rgba(255, 255, 255, 0.54)",
+        "--arches-search-hero-link-text-hover": "rgba(255, 255, 255, 0.9)",
+        "--arches-search-hero-toggle-border": "rgba(255, 255, 255, 0.14)",
+        "--arches-search-hero-toggle-bg": "rgba(255, 255, 255, 0.08)",
+        "--arches-search-hero-toggle-bg-hover": "rgba(255, 255, 255, 0.16)",
+        "--arches-search-hero-toggle-text": "rgba(255, 255, 255, 0.7)",
+
+        "--arches-search-query-builder-bg": "#f0fdf9",
+        "--arches-search-query-builder-border": "#99f6e4",
+        "--arches-search-query-builder-word": "#0f766e",
+        "--arches-search-query-builder-max-height": "55%",
+        "--arches-search-logic-and-bg": "#e0f2fe",
+        "--arches-search-logic-and-text": "#0369a1",
+        "--arches-search-logic-or-bg": "#fef3c7",
+        "--arches-search-logic-or-text": "#92400e",
+        "--arches-search-query-group-0-bg": "#f0fdf9",
+        "--arches-search-query-group-0-border": "#5eead4",
+        "--arches-search-query-group-0-header": "rgba(94, 234, 212, 0.18)",
+        "--arches-search-query-group-1-bg": "#f0f9ff",
+        "--arches-search-query-group-1-border": "#7dd3fc",
+        "--arches-search-query-group-1-header": "rgba(125, 211, 252, 0.18)",
+        "--arches-search-query-group-2-bg": "#fdf4ff",
+        "--arches-search-query-group-2-border": "#d8b4fe",
+        "--arches-search-query-group-2-header": "rgba(216, 180, 254, 0.18)",
+        "--arches-search-query-related-bg": "#eef2ff",
+        "--arches-search-query-related-border": "#6366f1",
+        "--arches-search-query-related-header": "rgba(99, 102, 241, 0.14)",
+        "--arches-search-query-related-accent": "#6366f1",
+        "--arches-search-query-negate-bg": "#fee2e2",
+        "--arches-search-query-negate-border": "#fca5a5",
+        "--arches-search-query-negate-text": "#b91c1c",
+        "--arches-search-query-model-pill-bg": "#e2e8f0",
+    },
+    ".p-theme-dark": {
+        "--arches-search-page-bg": "#0a0a0a",
+        "--arches-search-card-bg": "#171717",
+
+        "--arches-search-chip-search-bg": "#262626",
+        "--arches-search-chip-search-border": "#404040",
+        "--arches-search-chip-search-text": "#d4d4d4",
+
+        "--arches-search-highlight-bg": "#082f49",
+        "--arches-search-highlight-text": "#7dd3fc",
+
+        "--arches-search-live-bg": "#052e16",
+        "--arches-search-live-text": "#4ade80",
+
+        "--arches-search-filter-resource-type-bg": "#042f2e",
+        "--arches-search-filter-resource-type-border": "#0d9488",
+        "--arches-search-filter-resource-type-text": "#34d399",
+
+        "--arches-search-filter-time-bg": "#2d1f07",
+        "--arches-search-filter-time-border": "#a16207",
+        "--arches-search-filter-time-text": "#fde68a",
+
+        "--arches-search-filter-map-bg": "#082030",
+        "--arches-search-filter-map-border": "#1d4ed8",
+        "--arches-search-filter-map-text": "#93c5fd",
+
+        "--arches-search-filter-attribute-bg": "#2d1049",
+        "--arches-search-filter-attribute-border": "#7c3aed",
+        "--arches-search-filter-attribute-text": "#c4b5fd",
+
+        "--arches-search-filter-controlled-term-bg": "#2d1049",
+        "--arches-search-filter-controlled-term-border": "#7c3aed",
+        "--arches-search-filter-controlled-term-text": "#c4b5fd",
+
+        "--arches-search-filter-record-bg": "#052e16",
+        "--arches-search-filter-record-border": "#16a34a",
+        "--arches-search-filter-record-text": "#4ade80",
+
+        "--arches-search-filter-related-bg": "#2d1700",
+        "--arches-search-filter-related-text": "#fb923c",
+
+        "--arches-search-sec-btn-hover-bg": "#404040",
+
+        "--arches-search-sec-btn-text": "#a3a3a3",
+
+        "--arches-search-chip-border": "#262626",
+
+        "--arches-search-card-border": "#1e293b",
+        "--arches-search-card-shadow":
+            "0 0.1rem 0.3rem rgba(0, 0, 0, 0.3), 0 0.1rem 0.2rem rgba(0, 0, 0, 0.2)",
+        "--arches-search-card-shadow-hover": "0 0.6rem 2rem rgba(0, 0, 0, 0.5)",
+        "--arches-search-item-hover-shadow":
+            "0 0.1rem 0.3rem rgba(0, 0, 0, 0.4)",
+        "--arches-search-chip-hover-shadow": "0 0 0 0.2rem rgba(0, 0, 0, 0.4)",
+        "--arches-search-overlay-shadow":
+            "0 0.8rem 2.4rem rgba(0, 0, 0, 0.6), 0 0.2rem 0.6rem rgba(0, 0, 0, 0.35)",
+        "--arches-search-primary-muted-bg": "rgba(13, 148, 136, 0.14)",
+
+        "--arches-search-query-builder-bg": "#042f2e",
+        "--arches-search-query-builder-border": "#0d9488",
+        "--arches-search-query-builder-word": "#34d399",
+        "--arches-search-logic-and-bg": "#082f49",
+        "--arches-search-logic-and-text": "#7dd3fc",
+        "--arches-search-logic-or-bg": "#2d1f07",
+        "--arches-search-logic-or-text": "#fde68a",
+        "--arches-search-query-group-0-bg": "#042f2e",
+        "--arches-search-query-group-0-border": "#0d9488",
+        "--arches-search-query-group-0-header": "rgba(13, 148, 136, 0.22)",
+        "--arches-search-query-group-1-bg": "#082030",
+        "--arches-search-query-group-1-border": "#0284c7",
+        "--arches-search-query-group-1-header": "rgba(2, 132, 199, 0.22)",
+        "--arches-search-query-group-2-bg": "#2d1049",
+        "--arches-search-query-group-2-border": "#9333ea",
+        "--arches-search-query-group-2-header": "rgba(147, 51, 234, 0.22)",
+        "--arches-search-query-related-bg": "#1e1b4b",
+        "--arches-search-query-related-border": "#6366f1",
+        "--arches-search-query-related-header": "rgba(99, 102, 241, 0.24)",
+        "--arches-search-query-related-accent": "#818cf8",
+        "--arches-search-query-negate-bg": "#450a0a",
+        "--arches-search-query-negate-border": "#b91c1c",
+        "--arches-search-query-negate-text": "#fca5a5",
+        "--arches-search-query-model-pill-bg": "#1e293b",
+
+        "--arches-search-hero-search-bg": "rgba(17, 24, 39, 0.97)",
+        "--arches-search-hero-search-shadow":
+            "0 1.2rem 4rem rgba(0, 0, 0, 0.5), 0 0 0 0.1rem rgba(255, 255, 255, 0.08)",
+    },
 };
+
+// Matches createVueApplication()'s darkModeSelector-derived localStorage key
+// convention (arches_vue_components/application/create-vue-application.ts),
+// so a toggle here stays in sync with the class applied at app boot.
+export const DARK_MODE_CLASS = "p-theme-dark";
+export const DARK_MODE_STORAGE_KEY = `arches.${DARK_MODE_CLASS}`;
 
 // TODO: when dropping support for 7.6, just import from arches 8.
 const DEFAULT_THEME = {
@@ -43,7 +239,7 @@ const DEFAULT_THEME = {
         // preset: ArchesPreset,
         options: {
             prefix: "p",
-            darkModeSelector: ".p-theme-dark",
+            darkModeSelector: `.${DARK_MODE_CLASS}`,
             // darkModeSelector: ":root",
             cssLayer: false,
         },
@@ -54,53 +250,11 @@ const DEFAULT_THEME = {
 const ArchesSearchPreset = definePreset(Aura, {
     extend: {
         archesSearch: {
-            fontSize: "1.4rem",
+            fontSize: "1.6rem",
         },
     },
     semantic: {
-        primary: {
-            50: "{amber.50}",
-            100: "{amber.100}",
-            200: "{amber.200}",
-            300: "{amber.300}",
-            400: "{amber.400}",
-            500: "{amber.500}",
-            600: "{amber.600}",
-            700: "{amber.700}",
-            800: "{amber.800}",
-            900: "{amber.900}",
-            950: "{amber.950}",
-        },
-        colorScheme: {
-            light: {
-                // primary: {
-                //     color: "{amber.600}",
-                //     inverseColor: "#ffffff",
-                //     hoverColor: "{amber.900}",
-                //     activeColor: "{amber.800}",
-                // },
-                // highlight: {
-                //     background: "{sky.300}",
-                //     focusBackground: "{sky.700}",
-                //     color: "#ffffff",
-                //     focusColor: "#ffffff",
-                // }
-            },
-            dark: {
-                // primary: {
-                //     color: "{amber.400}",
-                //     inverseColor: "{amber.950}",
-                //     hoverColor: "{amber.100}",
-                //     activeColor: "{amber.200}",
-                // },
-                // highlight: {
-                //     background: "rgba(250, 250, 250, .16)",
-                //     focusBackground: "rgba(250, 250, 250, .24)",
-                //     color: "rgba(255,255,255,.87)",
-                //     focusColor: "rgba(255,255,255,.87)",
-                // },
-            },
-        },
+        primary: palette(ARCHES_SEARCH_TEAL),
     },
     css: compileGlobalCss(cssOverrides),
     components: {},

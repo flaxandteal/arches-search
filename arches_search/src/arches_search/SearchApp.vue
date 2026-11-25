@@ -1,89 +1,172 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed } from "vue";
+import { useRoute, useRouter } from "vue-router";
+import { useGettext } from "vue3-gettext";
 
-import Card from "primevue/card";
+import Button from "openvue/button";
+import Card from "openvue/card";
 
-import AdvancedSearch from "@/arches_search/AdvancedSearch/AdvancedSearch.vue";
-import SimpleSearch from "@/arches_search/SimpleSearch/SimpleSearch.vue";
+import { routeNames } from "@/arches_search/routes.ts";
+import { provideSearchFilters } from "@/arches_search/SimpleSearch/composables/useSearchFilters.ts";
+import { usePendingSearchStore } from "@/arches_search/stores/usePendingSearchStore.ts";
 
-const SIMPLE = "simple";
-const ADVANCED = "advanced";
-type SearchView = typeof SIMPLE | typeof ADVANCED;
+const router = useRouter();
+const route = useRoute();
+const { $gettext } = useGettext();
 
-const activeView = ref<SearchView>(SIMPLE);
+provideSearchFilters();
+
+router.afterEach((to, _from, failure) => {
+    if (to.name !== routeNames.simpleSearch || failure) {
+        usePendingSearchStore().clear();
+    }
+});
+
+const isSearchLanding = computed(() => route.name === routeNames.searchLanding);
+const isSimpleSearch = computed(() => route.name === routeNames.simpleSearch);
+
+const headerTitle = computed<string>(() => {
+    if (isSimpleSearch.value) {
+        return $gettext("Search the Collection");
+    }
+    return $gettext("Advanced Search");
+});
+
+const headerIcon = computed<string>(() => {
+    if (isSimpleSearch.value) {
+        return "pi pi-search";
+    }
+    return "pi pi-sliders-h";
+});
 </script>
 
 <template>
-    <Card class="search-card">
+    <Card
+        :class="{
+            'search-card': !isSearchLanding,
+            'search-landing-card': isSearchLanding,
+        }"
+    >
         <template #header>
-            <header class="simple-search-header">
+            <header
+                v-if="!isSearchLanding"
+                class="search-header"
+                :class="{ 'search-header-advanced': !isSimpleSearch }"
+            >
                 <h1 class="search-title">
-                    {{ $gettext("Search the Collection") }}
+                    <i :class="headerIcon" />
+                    {{ headerTitle }}
                 </h1>
                 <nav
-                    v-if="activeView === SIMPLE"
+                    v-if="isSimpleSearch"
                     class="header-nav"
                 >
-                    <button
+                    <Button
+                        icon="pi pi-sliders-h"
+                        icon-pos="left"
                         class="header-link"
-                        @click="activeView = ADVANCED"
-                    >
-                        <i class="pi pi-sliders-h" />
-                        {{ $gettext("Advanced Search") }}
-                    </button>
+                        :label="$gettext('Advanced Search')"
+                        :text="true"
+                        @click="
+                            router.push({ name: routeNames.advancedSearch })
+                        "
+                    />
                 </nav>
                 <nav
-                    v-if="activeView === ADVANCED"
+                    v-else
                     class="header-nav"
                 >
-                    <button
+                    <Button
+                        icon="pi pi-arrow-left"
+                        icon-pos="left"
                         class="header-link"
-                        @click="activeView = SIMPLE"
-                    >
-                        <i class="pi pi-sliders-h" />
-                        {{ $gettext("Simple Search") }}
-                    </button>
+                        :label="$gettext('Simple Search')"
+                        :text="true"
+                        @click="router.push({ name: routeNames.simpleSearch })"
+                    />
                 </nav>
             </header>
         </template>
         <template #content>
-            <SimpleSearch v-if="activeView === SIMPLE" />
-            <AdvancedSearch v-else />
+            <router-view />
         </template>
     </Card>
 </template>
 
 <style scoped>
 .search-card {
-    border: none;
-    border-radius: 0;
-    box-shadow: none;
+    display: flex;
+    flex-direction: column;
     height: 100%;
+    overflow: hidden;
+    border: 0.1rem solid var(--p-content-border-color);
+    border-radius: 0;
+    background-color: var(--arches-search-card-bg);
+    box-shadow: var(--arches-search-card-shadow);
 }
 
-.simple-search-header {
+.search-landing-card {
     display: flex;
+    flex-direction: column;
+    block-size: 100%;
+    overflow-y: auto;
+    border-radius: 0;
+    background-color: var(--arches-search-page-bg);
+}
+
+.search-header {
+    display: flex;
+    flex-shrink: 0;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
-    padding: 1rem 2rem;
-    background-color: var(--p-content-background);
-    border-bottom: 0.125rem solid var(--p-content-border-color);
+    gap: 1.6rem;
+    padding: 2rem 2rem 0.4rem;
+    background-color: var(--arches-search-card-bg);
+}
+
+.search-header.search-header-advanced {
+    padding: 1.4rem 2.4rem;
+    border-block-end: 0.1rem solid var(--p-content-border-color);
 }
 
 .search-title {
-    font-size: 2rem;
-    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 1.2rem;
     margin: 0;
+    color: var(--p-text-color);
+    font-size: 2.2rem;
+    font-weight: 700;
+    letter-spacing: -0.044rem;
 }
 
-:deep(.p-card-body) {
+.search-title .pi {
+    font-size: 1.8rem;
+    color: var(--p-primary-color);
+}
+
+.search-card :deep(.p-card-body),
+.search-landing-card :deep(.p-card-body) {
+    display: flex;
+    flex-direction: column;
     flex: 1;
     padding: 0;
+}
+
+.search-card :deep(.p-card-content),
+.search-landing-card :deep(.p-card-content) {
+    flex: 1;
+}
+
+.search-card :deep(.p-card-body) {
+    min-block-size: 0;
+    overflow-x: hidden;
     overflow-y: hidden;
 }
 
-:deep(.p-card-content) {
-    height: 100%;
+.search-card :deep(.p-card-content) {
+    min-block-size: 0;
 }
 
 .header-nav {
@@ -92,19 +175,20 @@ const activeView = ref<SearchView>(SIMPLE);
 }
 
 .header-link {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    font-size: var(--p-arches-search-font-size);
-    text-decoration: none;
-    background: none;
-    border: none;
-    padding: 0;
-    cursor: pointer;
-    font-family: inherit;
+    padding: 0.5rem 1.2rem;
+    color: var(--p-highlight-color);
+    border-radius: var(--arches-search-radius-pill);
+    background: var(--p-highlight-background);
+    font-size: 1.2rem;
+    font-weight: 600;
+    white-space: nowrap;
+    transition:
+        background 0.15s,
+        color 0.15s;
 }
 
 .header-link:hover {
-    text-decoration: underline;
+    background: var(--p-highlight-focus-background);
+    color: var(--p-highlight-focus-color);
 }
 </style>

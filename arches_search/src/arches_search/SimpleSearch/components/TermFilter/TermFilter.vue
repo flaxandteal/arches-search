@@ -1,0 +1,332 @@
+<script setup lang="ts">
+import { useGettext } from "vue3-gettext";
+
+import AutoComplete from "openvue/autocomplete";
+import Button from "openvue/button";
+import Tab from "openvue/tab";
+import TabList from "openvue/tablist";
+import Tabs from "openvue/tabs";
+
+import SuggestionOption from "@/arches_search/SimpleSearch/components/TermFilter/components/SuggestionOption.vue";
+
+import { useSearchFilters } from "@/arches_search/SimpleSearch/composables/useSearchFilters.ts";
+import { useTermSuggestions } from "@/arches_search/SimpleSearch/composables/useTermSuggestions.ts";
+import { getTermKind } from "@/arches_search/SimpleSearch/components/TermFilter/suggestion-utils.ts";
+
+import { TERM_KIND_RECORD } from "@/arches_search/SimpleSearch/types.ts";
+import type {
+    SerializedTerm,
+    TermSuggestion,
+} from "@/arches_search/SimpleSearch/types.ts";
+
+interface TermSuggestionSelectEvent {
+    value: TermSuggestion;
+}
+
+const { filterKey } = defineProps<{
+    filterKey: string;
+}>();
+
+const { $gettext } = useGettext();
+const searchFilters = useSearchFilters();
+
+const {
+    autoCompleteRef,
+    inputText,
+    isOverlayShown,
+    typeaheadPanel,
+    emptySearchMessage,
+    typeaheadPanels,
+    activeSuggestions,
+    onComplete,
+    showOverlay,
+    hideOverlay,
+    getNoResultsMessage,
+    resolveSubmitCandidate,
+    markSuggestionHandled,
+} = useTermSuggestions();
+
+function termKey(termValue: string): string {
+    return `${filterKey}:${termValue}`;
+}
+
+function addTerm(suggestion: TermSuggestion): void {
+    const id = termKey(suggestion.text);
+    const isAlreadySelected = searchFilters.activeFilters.value.some(
+        (activeFilter) => activeFilter.id === id,
+    );
+    if (isAlreadySelected) {
+        return;
+    }
+
+    const term: SerializedTerm = {
+        id,
+        text: suggestion.text,
+        inverted: false,
+    };
+    const termKind = getTermKind(suggestion);
+    if (termKind) {
+        term.termKind = termKind;
+    }
+    if (termKind === TERM_KIND_RECORD && suggestion.graph_icon) {
+        term.icon = suggestion.graph_icon;
+    }
+    searchFilters.setTermFilter(term);
+}
+
+function onSelect(event: TermSuggestionSelectEvent): void {
+    addTerm(event.value);
+    inputText.value = "";
+    markSuggestionHandled();
+}
+
+function onKeydown(event: KeyboardEvent): void {
+    if (event.key !== "Enter" || isOverlayShown.value) {
+        return;
+    }
+
+    submitSearch();
+}
+
+function submitSearch(): void {
+    const suggestionToSubmit = resolveSubmitCandidate();
+    if (!suggestionToSubmit) {
+        return;
+    }
+
+    onSelect({ value: suggestionToSubmit });
+}
+</script>
+
+<template>
+    <div class="search-bar">
+        <span class="search-bar-inner">
+            <i
+                aria-hidden="true"
+                class="pi pi-search search-icon"
+            />
+            <AutoComplete
+                ref="autoCompleteRef"
+                v-model="inputText"
+                class="search-input"
+                overlay-class="term-filter-overlay"
+                option-label="text"
+                scroll-height="32rem"
+                append-to="self"
+                :auto-option-focus="true"
+                :empty-search-message="emptySearchMessage"
+                :fluid="true"
+                :placeholder="$gettext('Find an item, sample, supplier…')"
+                :suggestions="activeSuggestions"
+                @complete="onComplete"
+                @option-select="onSelect"
+                @keydown="onKeydown"
+                @before-show="showOverlay"
+                @before-hide="hideOverlay"
+            >
+                <template #header>
+                    <div class="suggestion-tab-bar">
+                        <Tabs v-model:value="typeaheadPanel">
+                            <TabList>
+                                <Tab
+                                    v-for="panel in typeaheadPanels"
+                                    :key="panel.id"
+                                    :value="panel.id"
+                                    @mousedown.prevent
+                                >
+                                    <i :class="panel.icon" />
+                                    {{ panel.label }}
+                                </Tab>
+                            </TabList>
+                        </Tabs>
+                    </div>
+                </template>
+
+                <template #option="{ option }">
+                    <SuggestionOption
+                        :suggestion="option"
+                        :query="inputText"
+                    />
+                </template>
+
+                <template #empty>
+                    <span class="typeahead-no-results">{{
+                        getNoResultsMessage()
+                    }}</span>
+                </template>
+            </AutoComplete>
+        </span>
+        <Button
+            icon="pi pi-search"
+            icon-pos="left"
+            class="search-button"
+            type="button"
+            :label="$gettext('Search')"
+            @click="submitSearch"
+        />
+    </div>
+</template>
+
+<style scoped>
+.search-bar {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1.2rem 1.6rem;
+    background-color: var(--p-content-background);
+}
+
+.search-bar .search-icon {
+    font-size: 1.5rem;
+    color: var(--p-text-muted-color, var(--p-surface-500));
+    flex-shrink: 0;
+}
+
+.search-bar .search-bar-inner {
+    display: flex;
+    align-items: center;
+    flex: 1;
+    max-width: 40%;
+    gap: 1rem;
+    background-color: var(--arches-search-page-bg);
+    border: 0.15rem solid var(--p-content-border-color);
+    border-radius: 0.8rem;
+    padding: 0 1.4rem;
+    transition:
+        border-color 0.15s,
+        box-shadow 0.15s;
+}
+
+.search-bar .search-bar-inner:focus-within {
+    border-color: var(--p-primary-color);
+    box-shadow: 0 0 0 0.3rem var(--p-primary-100);
+}
+
+.search-bar .search-input {
+    flex: 1;
+}
+
+.search-bar :deep(.search-input .p-autocomplete-input) {
+    border: none;
+    box-shadow: none;
+    padding: 1.2rem 0;
+    font-size: 1.4rem;
+    width: 100%;
+    background-color: transparent;
+    color: var(--p-text-color);
+}
+
+.search-bar :deep(.search-input .p-autocomplete-input::placeholder) {
+    color: var(--p-text-muted-color, var(--p-surface-500));
+}
+
+.search-bar :deep(.search-input .p-autocomplete-input:focus),
+.search-bar :deep(.search-input .p-autocomplete-input:focus-visible) {
+    outline: none !important;
+    box-shadow: none;
+}
+
+.search-bar .search-button {
+    font-size: var(--p-arches-search-font-size);
+    font-weight: 700;
+    padding: 1rem 2rem;
+    border-radius: 0.8rem;
+    white-space: nowrap;
+}
+
+.search-bar .search-button :deep(.p-button-icon) {
+    display: inline-flex;
+    align-items: center;
+    font-size: 1.4rem;
+}
+
+.search-bar :deep(.term-filter-overlay.p-autocomplete-overlay) {
+    overflow: hidden;
+    border-width: 0.15rem;
+    border-radius: 0.8rem;
+    box-shadow: var(--arches-search-overlay-shadow);
+    max-inline-size: var(--arches-search-typeahead-overlay-max-width);
+}
+
+.search-bar :deep(.term-filter-overlay .p-autocomplete-list) {
+    gap: 0;
+    padding: 0;
+}
+
+.search-bar :deep(.term-filter-overlay .p-autocomplete-option) {
+    border-radius: 0;
+    border-block-end: 0.1rem solid var(--p-content-border-color);
+    padding: 0.8rem 1.4rem;
+}
+
+.search-bar :deep(.term-filter-overlay .p-autocomplete-option:last-child) {
+    border-block-end: none;
+}
+
+.search-bar :deep(.term-filter-overlay .p-autocomplete-option:hover),
+.search-bar :deep(.term-filter-overlay .p-autocomplete-option.p-focus) {
+    background: var(--p-highlight-background);
+}
+
+.search-bar :deep(.term-filter-overlay .p-autocomplete-empty-message) {
+    padding: 1.2rem 1.4rem;
+    font-size: 1.3rem;
+    color: var(--p-text-muted-color, var(--p-surface-500));
+    text-align: center;
+}
+
+.suggestion-tab-bar {
+    display: flex;
+    align-items: center;
+    padding: 0.8rem 1rem;
+    border-block-end: 0.1rem solid var(--p-content-border-color);
+    background: var(--arches-search-page-bg);
+}
+
+.suggestion-tab-bar :deep(.p-tablist) {
+    background: transparent;
+    border-width: 0;
+}
+
+.suggestion-tab-bar :deep(.p-tablist-tab-list) {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    border: none;
+}
+
+.suggestion-tab-bar :deep(.p-tablist-active-bar) {
+    display: none;
+}
+
+.suggestion-tab-bar :deep(.p-tab) {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 1rem;
+    border-radius: var(--arches-search-radius-pill);
+    font-size: 1.2rem;
+    font-weight: 500;
+    white-space: nowrap;
+    cursor: pointer;
+    border: 0.15rem solid var(--arches-search-chip-border);
+    background: var(--p-content-background);
+    color: var(--arches-search-sec-btn-text);
+    font-family: inherit;
+}
+
+.suggestion-tab-bar :deep(.p-tab:hover) {
+    background: var(--arches-search-sec-btn-hover-bg);
+}
+
+.suggestion-tab-bar :deep(.p-tab:focus-visible) {
+    outline: 0.2rem solid var(--p-primary-color);
+    outline-offset: 0.2rem;
+}
+
+.suggestion-tab-bar :deep(.p-tab-active) {
+    background: var(--p-primary-color);
+    border-color: var(--p-primary-color);
+    color: var(--p-primary-contrast-color, var(--p-surface-0));
+}
+</style>

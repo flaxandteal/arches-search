@@ -1,25 +1,49 @@
 import Cookies from "js-cookie";
 
-import { generateArchesURL } from "@/arches/utils/generate-arches-url.ts";
+import { generateArchesURL } from "@/arches_vue_components/application";
+import { ALT_LABEL, PREF_LABEL } from "@/arches_controlled_lists/constants.ts";
+import { buildSearchApiRequestBody } from "@/arches_search/SimpleSearch/utils/search-payload-builder.ts";
 
+import type { FeatureCollection } from "geojson";
+
+import type { ControlledListItem } from "@/arches_controlled_lists/types.ts";
+import type { ReferenceSelectNodeValue } from "@/arches_controlled_lists/datatypes/reference-select/types.ts";
 import type {
     GroupPayload,
     SearchResults,
 } from "@/arches_search/AdvancedSearch/types.ts";
 import type {
+    DateRangeFilter,
+    ExportRequest,
     NodeFilterConfigResponse,
+    ResourceFieldFilter,
+    ResourceFieldMetadata,
     SavedSearch,
+    SearchDefinition,
+    SearchRequestTerm,
     SortSpec,
     TermSuggestion,
 } from "@/arches_search/SimpleSearch/types.ts";
-import type { FeatureCollection } from "geojson";
 
 export async function createSearchMVTContext(params: {
-    terms?: { type: string; text: string; inverted: boolean }[];
-    query?: GroupPayload;
-    graphId?: string | null;
+    terms?: SearchRequestTerm[];
+    queries?: GroupPayload[];
+    graphSlugs?: string[];
     mapFilter?: FeatureCollection | null;
+    dateRange?: DateRangeFilter | null;
+    resourceFieldFilters?: ResourceFieldFilter[] | null;
+    maxHops?: number;
 }): Promise<{ context_id: string }> {
+    const requestPayload = buildSearchApiRequestBody({
+        terms: params.terms ?? [],
+        queries: params.queries,
+        graphSlugs: params.graphSlugs ?? [],
+        mapFilter: params.mapFilter ?? null,
+        dateRange: params.dateRange ?? null,
+        resourceFieldFilters: params.resourceFieldFilters ?? null,
+        maxHops: params.maxHops,
+    });
+
     const url = generateArchesURL("arches_search:search_mvt_context");
     const response = await fetch(url, {
         method: "POST",
@@ -27,7 +51,7 @@ export async function createSearchMVTContext(params: {
             "Content-Type": "application/json",
             "X-CSRFToken": Cookies.get("csrftoken") || "",
         },
-        body: JSON.stringify(params),
+        body: JSON.stringify(requestPayload),
     });
     if (!response.ok) {
         throw new Error(response.statusText);
@@ -37,42 +61,45 @@ export async function createSearchMVTContext(params: {
 
 export async function fetchSearchResults({
     terms = [],
-    query = {} as GroupPayload,
-    graphId = null,
+    queries = [],
+    graphSlugs = [],
     mapFilter = null,
+    dateRange = null,
+    resourceFieldFilters = null,
+    maxHops,
     page = 1,
     sort,
 }: {
-    terms?: { type: string; text: string; inverted: boolean }[];
-    query?: GroupPayload;
-    graphId?: string | null;
+    terms?: SearchRequestTerm[];
+    queries?: GroupPayload[];
+    graphSlugs?: string[];
     mapFilter?: FeatureCollection | null;
+    dateRange?: DateRangeFilter | null;
+    resourceFieldFilters?: ResourceFieldFilter[] | null;
+    maxHops?: number;
     page?: number;
     sort?: SortSpec[];
 } = {}): Promise<SearchResults> {
-    const requestPayload: Record<string, unknown> = {
-        graphId: graphId,
-        terms: terms,
-        query: query,
-        mapFilter: mapFilter,
-        page: page,
-    };
+    const requestPayload = buildSearchApiRequestBody({
+        terms,
+        queries,
+        graphSlugs,
+        mapFilter,
+        dateRange,
+        resourceFieldFilters,
+        maxHops,
+        page,
+        sort,
+    });
 
-    if (sort !== undefined) {
-        requestPayload.sort = sort;
-    }
-
-    const response = await fetch(
-        `${generateArchesURL("arches_search:arches_search")}`,
-        {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "X-CSRFToken": Cookies.get("csrftoken") || "",
-            },
-            body: JSON.stringify(requestPayload),
+    const response = await fetch(generateArchesURL("arches_search:search"), {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "X-CSRFToken": Cookies.get("csrftoken") || "",
         },
-    );
+        body: JSON.stringify(requestPayload),
+    });
 
     if (!response.ok) {
         throw new Error(response.statusText);
@@ -85,9 +112,12 @@ export async function fetchNodeFilterConfig(
     graphId: string,
     slug = "filtering",
 ): Promise<NodeFilterConfigResponse> {
-    const params = new URLSearchParams({ slug });
     const response = await fetch(
-        `${generateArchesURL("arches_search:node_filter_config_for_graph", { graph_id: graphId })}?${params.toString()}`,
+        generateArchesURL(
+            "arches_search:node_filter_config_for_graph",
+            { graph_id: graphId },
+            { slug },
+        ),
     );
     if (!response.ok) {
         throw new Error(response.statusText);
@@ -95,44 +125,40 @@ export async function fetchNodeFilterConfig(
     return response.json();
 }
 
-export async function fetchControlledListItems(
+export async function fetchControlledListReferenceValues(
     listId: string,
-): Promise<
-    Array<{ id: string; label: string; uri: string; sortorder: number }>
-> {
+): Promise<ReferenceSelectNodeValue[]> {
     const response = await fetch(
-        `${generateArchesURL("arches_controlled_lists:controlled_list", { list_id: listId })}?flat=true`,
+        generateArchesURL(
+            "arches:controlled_list",
+            { list_id: listId },
+            { flat: "true" },
+        ),
     );
     if (!response.ok) {
         throw new Error(response.statusText);
     }
     const data = await response.json();
-    return (data.items as Array<Record<string, unknown>>)
-        .filter((item: Record<string, unknown>) => !item.guide)
-        .map((item: Record<string, unknown>) => {
-            const values = item.values as Array<{
-                valuetype_id: string;
-                language_id: string;
-                value: string;
-            }>;
-            const prefLabel = values.find(
-                (v) => v.valuetype_id === "prefLabel",
-            );
-            return {
-                id: item.id as string,
-                label: prefLabel?.value ?? (item.uri as string),
-                uri: item.uri as string,
-                sortorder: item.sortorder as number,
-            };
-        });
+    return (data.items as ControlledListItem[])
+        .filter((item) => !item.guide)
+        .map((item) => ({
+            list_id: item.list_id,
+            uri: item.uri,
+            labels: item.values.filter((value) =>
+                [PREF_LABEL, ALT_LABEL].includes(value.valuetype_id),
+            ),
+        }));
 }
 
 export async function fetchSearchTermSuggestions(
     query: string,
 ): Promise<TermSuggestion[]> {
-    const params = new URLSearchParams({ q: query, lang: "*", flat: "true" });
     const response = await fetch(
-        `${generateArchesURL("arches_search:term_suggestion_search")}?${params.toString()}`,
+        generateArchesURL(
+            "arches_search:term_suggestion_search",
+            {},
+            { q: query, lang: "*", flat: "true" },
+        ),
     );
     const results = await response.json();
     const suggestions = results.results as Array<TermSuggestion>;
@@ -147,12 +173,12 @@ export async function getSavedSearches(
     scope: "mine" | "shared" = "mine",
     search = "",
 ): Promise<SavedSearch[]> {
-    const params = new URLSearchParams({ scope });
+    const queryParameters: Record<string, string> = { scope };
     if (search) {
-        params.set("search", search);
+        queryParameters.search = search;
     }
     const response = await fetch(
-        `${generateArchesURL("arches_search:saved_searches")}?${params.toString()}`,
+        generateArchesURL("arches_search:saved_searches", {}, queryParameters),
     );
     if (!response.ok) {
         throw new Error(response.statusText);
@@ -163,7 +189,7 @@ export async function getSavedSearches(
 export async function createSavedSearch(
     name: string,
     description: string,
-    queryDefinition: Record<string, unknown>,
+    queryDefinition: SearchDefinition,
 ): Promise<SavedSearch> {
     const response = await fetch(
         generateArchesURL("arches_search:saved_searches"),
@@ -188,7 +214,7 @@ export async function createSavedSearch(
 
 export async function deleteSavedSearch(savedsearchid: string): Promise<void> {
     const response = await fetch(
-        `${generateArchesURL("arches_search:saved_searches")}/${savedsearchid}`,
+        generateArchesURL("arches_search:saved_search", { savedsearchid }),
         {
             method: "DELETE",
             headers: {
@@ -204,16 +230,34 @@ export async function deleteSavedSearch(savedsearchid: string): Promise<void> {
 export async function exportSearchResults({
     terms = [],
     query,
-    graphId = null,
+    graphSlugs = [],
+    dateRange = null,
+    resourceFieldFilters = null,
+    maxHops,
     filename = "search_export",
     allDescriptors = false,
 }: {
-    terms?: { type: string; text: string; inverted: boolean }[];
+    terms?: SearchRequestTerm[];
     query?: GroupPayload;
-    graphId?: string | null;
+    graphSlugs?: string[];
+    dateRange?: DateRangeFilter | null;
+    resourceFieldFilters?: ResourceFieldFilter[] | null;
+    maxHops?: number;
     filename?: string;
     allDescriptors?: boolean;
 }): Promise<void> {
+    const requestPayload = buildSearchApiRequestBody({
+        terms,
+        query,
+        graphSlugs,
+        mapFilter: null,
+        dateRange,
+        resourceFieldFilters,
+        maxHops,
+    });
+    requestPayload.filename = filename;
+    requestPayload.allDescriptors = allDescriptors;
+
     const response = await fetch(
         generateArchesURL("arches_search:search_export"),
         {
@@ -222,13 +266,7 @@ export async function exportSearchResults({
                 "Content-Type": "application/json",
                 "X-CSRFToken": Cookies.get("csrftoken") || "",
             },
-            body: JSON.stringify({
-                terms,
-                query,
-                graphId,
-                filename,
-                allDescriptors,
-            }),
+            body: JSON.stringify(requestPayload),
         },
     );
 
@@ -243,4 +281,72 @@ export async function exportSearchResults({
     anchor.download = filename;
     anchor.click();
     window.URL.revokeObjectURL(url);
+}
+
+export async function startSearchResultsExport({
+    terms = [],
+    queries,
+    graphSlugs = [],
+    mapFilter = null,
+    dateRange = null,
+    resourceFieldFilters = null,
+    exportRequest,
+}: {
+    terms?: SearchRequestTerm[];
+    queries?: GroupPayload[];
+    graphSlugs?: string[];
+    mapFilter?: FeatureCollection | null;
+    dateRange?: DateRangeFilter | null;
+    resourceFieldFilters?: ResourceFieldFilter[] | null;
+    exportRequest: ExportRequest;
+}): Promise<void> {
+    const requestPayload = buildSearchApiRequestBody({
+        terms,
+        queries,
+        graphSlugs,
+        mapFilter,
+        dateRange,
+        resourceFieldFilters,
+    });
+    requestPayload.format = exportRequest.format;
+    requestPayload.filename = exportRequest.filename;
+    requestPayload.exportConceptsAs = exportRequest.exportConceptsAs;
+
+    const response = await fetch(
+        generateArchesURL("arches_search:search_results_export"),
+        {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-CSRFToken": Cookies.get("csrftoken") || "",
+            },
+            body: JSON.stringify(requestPayload),
+        },
+    );
+
+    if (!response.ok) {
+        const errorBody = await response.json().catch(() => null);
+        throw new Error(errorBody?.error ?? response.statusText);
+    }
+}
+
+export async function fetchResourceFieldMetadata(
+    graphSlugs: string[] = [],
+): Promise<ResourceFieldMetadata[]> {
+    const searchParams = new URLSearchParams();
+    graphSlugs.forEach((graphSlug) =>
+        searchParams.append("graph_slugs", graphSlug),
+    );
+
+    const url = `${generateArchesURL(
+        "arches_search:resource_field_metadata",
+    )}?${searchParams}`;
+    const response = await fetch(url);
+
+    if (!response.ok) {
+        throw new Error(response.statusText);
+    }
+
+    const responseJson = await response.json();
+    return responseJson.fields;
 }

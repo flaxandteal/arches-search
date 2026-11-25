@@ -1,0 +1,252 @@
+import { groupBy } from "es-toolkit";
+
+import {
+    ClauseSubjectTypeToken,
+    LogicToken,
+} from "@/arches_search/AdvancedSearch/types.ts";
+import {
+    ADVANCED_QUERY_KEY,
+    TERM_KIND_CONTROLLED_TERM,
+    TERM_KIND_RECORD,
+} from "@/arches_search/SimpleSearch/types.ts";
+
+import type { FeatureCollection } from "geojson";
+import type { GroupPayload } from "@/arches_search/AdvancedSearch/types.ts";
+import type {
+    DateRangeFilter,
+    SearchDefinition,
+    SearchRequestTerm,
+    SerializedTerm,
+    SortSpec,
+    TermKind,
+} from "@/arches_search/SimpleSearch/types.ts";
+
+export function isTermKind(value: unknown): value is TermKind {
+    return value === TERM_KIND_CONTROLLED_TERM || value === TERM_KIND_RECORD;
+}
+
+export function buildRequestTerms(
+    terms: { text: string; inverted: boolean; termKind?: TermKind }[],
+): SearchRequestTerm[] {
+    return terms.map((term) => {
+        let type: SearchRequestTerm["type"] = "string";
+        if (term.termKind === TERM_KIND_CONTROLLED_TERM) {
+            type = term.termKind;
+        }
+        return { type, text: term.text, inverted: term.inverted };
+    });
+}
+
+// The "all date nodes" time filter is stored as a single SEARCH_MODELS clause
+// on one graph, but is sent as a date range that filters every searched graph
+// rather than as part of the query — see buildRequestDateRange.
+function isNodeAgnosticDateQuery(payload: GroupPayload): boolean {
+    return (
+        payload.clauses.length === 1 &&
+        payload.clauses[0].subject.type === ClauseSubjectTypeToken.SEARCH_MODELS
+    );
+}
+
+export function buildRequestDateRange(
+    queries: GroupPayload[],
+): DateRangeFilter | null {
+    const dateQuery = queries.find(isNodeAgnosticDateQuery);
+    if (!dateQuery) {
+        return null;
+    }
+    const [fromOperand, toOperand] = dateQuery.clauses[0].operands;
+    return {
+        from: fromOperand.value as string,
+        to:
+            (toOperand?.value as string | undefined) ??
+            (fromOperand.value as string),
+    };
+}
+
+export function buildRequestQuery(
+    queries: GroupPayload[],
+): GroupPayload | undefined {
+    const advancedQueries = queries.filter(
+        (payload) => !isNodeAgnosticDateQuery(payload),
+    );
+    if (advancedQueries.length === 0) {
+        return undefined;
+    }
+    return mergeQueries(advancedQueries);
+}
+
+// The API takes one payload per graph, so queries are grouped by the graph
+// they filter and each group is AND-combined. A query for a graph that is not
+// being searched is left out rather than sent to be ignored. Only a keyed
+// query can be the all-date-nodes time filter; an advanced query of one
+// any-field clause has the same shape but is always sent.
+export function buildRequestQueries(
+    keyedQueries: GroupPayload[],
+    advancedQuery: GroupPayload | null,
+    requestedGraphSlugs: string[],
+): GroupPayload[] {
+    const requestedGraphSlugSet = new Set(requestedGraphSlugs);
+    const candidateQueries = keyedQueries.filter(
+        (payload) => !isNodeAgnosticDateQuery(payload),
+    );
+    if (advancedQuery) {
+        candidateQueries.push(advancedQuery);
+    }
+    const searchedQueries = candidateQueries.filter((payload) =>
+        requestedGraphSlugSet.has(payload.graph_slug),
+    );
+    const queriesByGraphSlug = groupBy(
+        searchedQueries,
+        (payload) => payload.graph_slug,
+    );
+    return Object.values(queriesByGraphSlug).map(mergeQueries);
+}
+
+function mergeQueries(queries: GroupPayload[]): GroupPayload {
+    if (queries.length === 1) {
+        return queries[0];
+    }
+    return {
+        graph_slug: queries[0].graph_slug,
+        scope: queries[0].scope,
+        logic: LogicToken.AND,
+        clauses: [],
+        groups: queries,
+        aggregations: [],
+        relationship: null,
+    };
+}
+
+export function parseSearchDefinition(
+    raw: Record<string, unknown>,
+): SearchDefinition {
+    const rawTerms = Array.isArray(raw.terms) ? raw.terms : [];
+    const terms = rawTerms.flatMap((rawTerm) => {
+        if (!rawTerm || typeof rawTerm !== "object") {
+            return [];
+        }
+        const term = rawTerm as Record<string, unknown>;
+        const id = typeof term.id === "string" ? term.id : null;
+        const text = typeof term.text === "string" ? term.text : null;
+        if (!id || text === null) {
+            return [];
+        }
+
+        const parsedTerm: SerializedTerm = {
+            id,
+            text,
+            inverted: term.inverted === true,
+        };
+        if (isTermKind(term.termKind)) {
+            parsedTerm.termKind = term.termKind;
+        }
+        if (typeof term.icon === "string") {
+            parsedTerm.icon = term.icon;
+        }
+        if (term.options && typeof term.options === "object") {
+            parsedTerm.options = term.options as Record<string, unknown>;
+        }
+
+        return [parsedTerm];
+    });
+
+    let queriesIn: SearchDefinition["queries"] = {};
+    if (raw.queries && typeof raw.queries === "object") {
+        queriesIn = raw.queries as SearchDefinition["queries"];
+    }
+
+    let graphSlugs: string[] = [];
+    if (Array.isArray(raw.graphSlugs)) {
+        graphSlugs = raw.graphSlugs.filter(
+            (slug): slug is string => typeof slug === "string",
+        );
+    }
+
+    let mapFilter: FeatureCollection | null = null;
+    if (raw.mapFilter && typeof raw.mapFilter === "object") {
+        mapFilter = raw.mapFilter as FeatureCollection;
+    }
+
+    let sort: SortSpec[] = [];
+    if (Array.isArray(raw.sort)) {
+        sort = raw.sort.filter(isSortSpec);
+    }
+
+    // Searches saved before the switch existed included related resources.
+    const includeRelated = raw.includeRelated !== false;
+
+    return {
+        terms,
+        queries: queriesIn,
+        graphSlugs,
+        mapFilter,
+        sort,
+        includeRelated,
+    };
+}
+
+function isSortSpec(value: unknown): value is SortSpec {
+    return (
+        typeof value === "object" &&
+        value !== null &&
+        "type" in value &&
+        typeof value.type === "string" &&
+        "direction" in value &&
+        typeof value.direction === "string"
+    );
+}
+
+// What Advanced Search saves: its query alone, on its model.
+export function buildAdvancedSearchDefinition(
+    graphSlug: string,
+    advancedQuery: GroupPayload | null,
+    sort: SortSpec[],
+): SearchDefinition {
+    let queries: Record<string, GroupPayload> = {};
+    if (advancedQuery) {
+        queries = { [ADVANCED_QUERY_KEY]: advancedQuery };
+    }
+    return {
+        terms: [],
+        queries,
+        graphSlugs: [graphSlug],
+        mapFilter: null,
+        sort,
+        includeRelated: false,
+    };
+}
+
+// Keyed queries Simple Search cannot show as filters join the advanced query,
+// ANDed, so Advanced Search can show and edit them. Only those on its model
+// can join; with no advanced query yet, the first one's model is used.
+export function foldQueriesIntoAdvancedQuery(
+    advancedQuery: GroupPayload | null,
+    queriesToFold: ReadonlyMap<string, GroupPayload>,
+): { advancedQuery: GroupPayload; foldedKeys: string[] } | null {
+    const candidates = [...queriesToFold].map(([key, query]) => ({
+        key,
+        query,
+    }));
+    if (candidates.length === 0) {
+        return null;
+    }
+
+    const graphSlug =
+        advancedQuery?.graph_slug ?? candidates[0].query.graph_slug;
+    const candidatesOnModel = candidates.filter(
+        (candidate) => candidate.query.graph_slug === graphSlug,
+    );
+    if (candidatesOnModel.length === 0) {
+        return null;
+    }
+
+    const foldedQueries = candidatesOnModel.map((candidate) => candidate.query);
+    let queriesToCombine = foldedQueries;
+    if (advancedQuery) {
+        queriesToCombine = [advancedQuery, ...foldedQueries];
+    }
+    return {
+        advancedQuery: mergeQueries(queriesToCombine),
+        foldedKeys: candidatesOnModel.map((candidate) => candidate.key),
+    };
+}

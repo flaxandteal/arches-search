@@ -3,14 +3,19 @@ from django.conf.urls.static import static
 from django.conf.urls.i18n import i18n_patterns
 from django.urls import include, path
 
-from arches_search.views.api.advanced_search import AdvancedSearchAPI
 from arches_search.views.api.advanced_search_sql import AdvancedSearchSQLAPI
 from arches_search.views.api.advanced_search_facet import (
     DatatypeFacetsAPI,
     AllDatatypeFacetsAPI,
 )
+from arches_search.views.api.advanced_search_operand_component import (
+    AdvancedSearchOperandComponentsAPI,
+)
 from arches_search.views.api.graph_models import GraphModelsAPI
 from arches_search.views.api.node_metadata_for_payload import NodeMetadataForPayloadAPI
+from arches_search.views.api.node_date_bounds_for_graph import (
+    NodeDateBoundsForGraphAPI,
+)
 from arches_search.views.api.nodes_with_widget_labels_for_graph import (
     NodesWithWidgetLabelsForGraphAPI,
 )
@@ -19,10 +24,16 @@ from arches_search.views.api.resource_names_for_payload import (
 )
 from arches_search.views.api.relatable_node_tree_for_graph import (
     RelatableNodesTreeForGraphAPI,
+    RelatableNodesTreeForGraphPairAPI,
 )
 from arches_search.views.api.resource_descriptors import ResourceDescriptorsAPI
+from arches_search.views.api.resource_field_metadata import ResourceFieldMetadataAPI
 from arches_search.views.api.saved_search import SavedSearchAPI
 from arches_search.views.api.search_config import NodeFilterConfigAPI
+from arches_search.views.api.search_definition_counts import (
+    SearchDefinitionCountsAPI,
+)
+from arches_search.views.api.resource_type_counts import ResourceTypeCountsAPI
 from arches_search.views.api.term_suggestions import TermSuggestionView
 from arches_search.views.api.search_mvt import (
     EmptySearchTileAPI,
@@ -30,10 +41,19 @@ from arches_search.views.api.search_mvt import (
     SearchMVTContextAPI,
 )
 from arches_search.views.api.search_export import SearchExportAPI
-from arches_search.views.api.simple_search import SimpleSearchAPI
+from arches_search.views.api.search_results_export import (
+    SearchResultsExportAPI,
+)
+from arches_search.views.api.search import SearchAPI
+from arches_search.views.api.relationship_graph import (
+    RelationshipGraphAPI,
+    RelationshipGraphPathAPI,
+    RelationshipGraphRelatedResourcesAPI,
+    RelationshipGraphSummaryAPI,
+)
 
 urlpatterns = [
-    path("api/advanced-search", AdvancedSearchAPI.as_view(), name="advanced_search"),
+    path("api/search", SearchAPI.as_view(), name="search"),
     path(
         "api/advanced-search/sql",
         AdvancedSearchSQLAPI.as_view(),
@@ -60,6 +80,16 @@ urlpatterns = [
         name="all_datatype_facets",
     ),
     path(
+        "api/advanced-search/operand-components",
+        AdvancedSearchOperandComponentsAPI.as_view(),
+        name="advanced_search_operand_components",
+    ),
+    path(
+        "api/advanced-search/resource-fields",
+        ResourceFieldMetadataAPI.as_view(),
+        name="resource_field_metadata",
+    ),
+    path(
         "api/advanced-search/graph/models",
         GraphModelsAPI.as_view(),
         name="graph_models",
@@ -75,6 +105,16 @@ urlpatterns = [
         name="api-relatable-nodes-tree-for-graph",
     ),
     path(
+        "api/advanced-search/graph/<uuid:graph_id>/relatable-nodes-tree/<uuid:other_graph_id>",
+        RelatableNodesTreeForGraphPairAPI.as_view(),
+        name="api-relatable-nodes-tree-for-graph-pair",
+    ),
+    path(
+        "api/advanced-search/graph/<uuid:graph_id>/date-bounds",
+        NodeDateBoundsForGraphAPI.as_view(),
+        name="node_date_bounds_for_graph",
+    ),
+    path(
         "api/advanced-search/graph/<uuid:graph_id>/search-config",
         NodeFilterConfigAPI.as_view(),
         name="node_filter_config_for_graph",
@@ -83,6 +123,16 @@ urlpatterns = [
         "api/resource-descriptors",
         ResourceDescriptorsAPI.as_view(),
         name="api_resource_descriptors",
+    ),
+    path(
+        "api/search-definition-counts",
+        SearchDefinitionCountsAPI.as_view(),
+        name="search_definition_counts",
+    ),
+    path(
+        "api/resource-type-counts",
+        ResourceTypeCountsAPI.as_view(),
+        name="resource_type_counts",
     ),
     path(
         "api/saved-searches",
@@ -98,11 +148,6 @@ urlpatterns = [
         "api/term-suggestions",
         TermSuggestionView.as_view(),
         name="term_suggestion_search",
-    ),
-    path(
-        "api/arches-search",
-        SimpleSearchAPI.as_view(),
-        name="arches_search",
     ),
     path(
         "api/arches-search/mvt-context",
@@ -124,6 +169,31 @@ urlpatterns = [
         SearchExportAPI.as_view(),
         name="search_export",
     ),
+    path(
+        "api/search-results-export",
+        SearchResultsExportAPI.as_view(),
+        name="search_results_export",
+    ),
+    path(
+        "api/relationship-graph/summary",
+        RelationshipGraphSummaryAPI.as_view(),
+        name="relationship_graph_summary",
+    ),
+    path(
+        "api/relationship-graph/graph",
+        RelationshipGraphAPI.as_view(),
+        name="relationship_graph",
+    ),
+    path(
+        "api/relationship-graph/path",
+        RelationshipGraphPathAPI.as_view(),
+        name="relationship_graph_path",
+    ),
+    path(
+        "api/relationship-graph/related-resources",
+        RelationshipGraphRelatedResourcesAPI.as_view(),
+        name="relationship_graph_related_resources",
+    ),
 ]
 
 handler400 = "arches.app.views.main.custom_400"
@@ -132,10 +202,11 @@ handler404 = "arches.app.views.main.custom_404"
 handler500 = "arches.app.views.main.custom_500"
 
 # Ensure Arches core urls are superseded by project-level urls
-urlpatterns.append(path("", include("arches_controlled_lists.urls")))
-urlpatterns.append(path("", include("arches_component_lab.urls")))
-urlpatterns.append(path("", include("arches_querysets.urls")))
+urlpatterns.append(path("", include("arches.extensions.controlled_lists.urls")))
+urlpatterns.append(path("", include("arches.extensions.vue_components.urls")))
+urlpatterns.append(path("", include("arches.extensions.querysets.urls")))
 urlpatterns.append(path("", include("arches_modular_reports.urls")))
+urlpatterns.append(path("", include("arches_resource_sets.urls")))
 
 urlpatterns.append(path("", include("arches.urls")))
 

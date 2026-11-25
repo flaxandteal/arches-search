@@ -17,7 +17,6 @@ from arches_search.utils.advanced_search.advanced_search import (
     AdvancedSearchQueryCompiler,
 )
 
-
 PERSON_A_ID = uuid.UUID("d631f6e1-9da3-4236-93c8-7cda90a61536")
 PERSON_B_ID = uuid.UUID("77eddfe7-289a-464b-ae2d-8a442f298d99")
 PERSON_C_ID = uuid.UUID("60de0174-b81a-4efa-ba3b-83fbb1c5e075")
@@ -861,6 +860,20 @@ class AdvancedSearchTestCase(AdvancedSearchSetupMixin, TestCase):
                 "graph_slug": "dog",
                 "scope": "RESOURCE",
                 "logic": "AND",
+                "clauses": [],
+                "groups": [],
+                "aggregations": [],
+                "relationship": None,
+            }
+        )
+        self.assertEqual(result, {DOG_A_ID, DOG_B_ID, DOG_C_ID, DOG_D_ID})
+
+    def test_dog_baseline_with_or_logic_returns_all_dogs(self):
+        result = self._compile(
+            {
+                "graph_slug": "dog",
+                "scope": "RESOURCE",
+                "logic": "OR",
                 "clauses": [],
                 "groups": [],
                 "aggregations": [],
@@ -5096,6 +5109,179 @@ class AdvancedSearchTestCase(AdvancedSearchSetupMixin, TestCase):
         )
         self.assertIn(PERSON_D_ID, result)
         self.assertEqual(result, {PERSON_A_ID, PERSON_B_ID, PERSON_D_ID})
+
+    # --- Self-exclusion under an OR parent ---
+
+    def test_person_self_excluded_from_own_friends_under_or_parent(self):
+        """
+        Tests self-exclusion when the relationship group sits under an OR parent. Only Person C
+        (age=24) passes age > 23. The only person under 10 is Person D (age=5), and the only
+        friends list naming Person D is Person D's own, so with self-exclusion nobody has a
+        friend under 10 and the result is just C. Without self-exclusion Person D would match.
+        """
+        result = self._compile(
+            {
+                "graph_slug": "person",
+                "scope": "RESOURCE",
+                "logic": "OR",
+                "clauses": [
+                    {
+                        "type": "LITERAL",
+                        "quantifier": "ANY",
+                        "subject": {
+                            "type": "NODE",
+                            "graph_slug": "person",
+                            "node_alias": "age",
+                            "search_models": [],
+                        },
+                        "operator": "GREATER_THAN",
+                        "operands": [{"type": "LITERAL", "value": 23}],
+                    }
+                ],
+                "groups": [
+                    {
+                        "graph_slug": "person",
+                        "scope": "RESOURCE",
+                        "logic": "AND",
+                        "clauses": [],
+                        "groups": [
+                            {
+                                "graph_slug": "person",
+                                "scope": "RESOURCE",
+                                "logic": "AND",
+                                "clauses": [
+                                    {
+                                        "type": "LITERAL",
+                                        "quantifier": "ANY",
+                                        "subject": {
+                                            "type": "NODE",
+                                            "graph_slug": "person",
+                                            "node_alias": "age",
+                                            "search_models": [],
+                                        },
+                                        "operator": "LESS_THAN",
+                                        "operands": [{"type": "LITERAL", "value": 10}],
+                                    }
+                                ],
+                                "groups": [],
+                                "aggregations": [],
+                                "relationship": None,
+                            }
+                        ],
+                        "aggregations": [],
+                        "relationship": {
+                            "path": {
+                                "type": "NODE",
+                                "graph_slug": "person",
+                                "node_alias": "friends",
+                            },
+                            "is_inverse": False,
+                            "traversal_quantifier": "ANY",
+                        },
+                    }
+                ],
+                "aggregations": [],
+                "relationship": None,
+            }
+        )
+        self.assertEqual(result, {PERSON_C_ID})
+
+    # --- OR parent combining sibling subgroups with a relationship subgroup ---
+
+    def _person_age_equals_clause(self, age):
+        return {
+            "type": "LITERAL",
+            "quantifier": "ANY",
+            "subject": {
+                "type": "NODE",
+                "graph_slug": "person",
+                "node_alias": "age",
+                "search_models": [],
+            },
+            "operator": "EQUALS",
+            "operands": [{"type": "LITERAL", "value": age}],
+        }
+
+    def _person_age_equals_group(self, age):
+        return {
+            "graph_slug": "person",
+            "scope": "RESOURCE",
+            "logic": "AND",
+            "clauses": [self._person_age_equals_clause(age)],
+            "groups": [],
+            "aggregations": [],
+            "relationship": None,
+        }
+
+    def _friend_aged_group(self, friend_age, anchor_clauses):
+        return {
+            "graph_slug": "person",
+            "scope": "RESOURCE",
+            "logic": "AND",
+            "clauses": anchor_clauses,
+            "groups": [self._person_age_equals_group(friend_age)],
+            "aggregations": [],
+            "relationship": {
+                "path": {
+                    "type": "NODE",
+                    "graph_slug": "person",
+                    "node_alias": "friends",
+                },
+                "is_inverse": False,
+                "traversal_quantifier": "ANY",
+            },
+        }
+
+    def test_or_parent_keeps_sibling_subgroups_or_combined_beside_relationship_group(
+        self,
+    ):
+        """
+        Tests an OR root holding two plain subgroups and a relationship subgroup. Person A
+        (age=22) matches the first subgroup, Person C (age=24) the second, and Persons B and D
+        list Person A (age=22) as a friend. Any one subgroup is enough under OR, so all four
+        match. AND-combining the plain subgroups would demand an age of both 22 and 24 and
+        leave only B and D.
+        """
+        result = self._compile(
+            {
+                "graph_slug": "person",
+                "scope": "RESOURCE",
+                "logic": "OR",
+                "clauses": [],
+                "groups": [
+                    self._person_age_equals_group(22),
+                    self._person_age_equals_group(24),
+                    self._friend_aged_group(22, anchor_clauses=[]),
+                ],
+                "aggregations": [],
+                "relationship": None,
+            }
+        )
+        self.assertEqual(result, {PERSON_A_ID, PERSON_B_ID, PERSON_C_ID, PERSON_D_ID})
+
+    def test_or_parent_keeps_relationship_group_anchor_clause_and_combined(self):
+        """
+        Tests an OR root holding a literal clause and a relationship subgroup that carries its
+        own anchor clause. Person C (age=24) matches the literal. The relationship subgroup
+        means age=5 AND a friend aged 22, which only Person D (age=5, friend Person A) meets.
+        Person B also lists Person A as a friend but is not age 5, so B must not match.
+        """
+        result = self._compile(
+            {
+                "graph_slug": "person",
+                "scope": "RESOURCE",
+                "logic": "OR",
+                "clauses": [self._person_age_equals_clause(24)],
+                "groups": [
+                    self._friend_aged_group(
+                        22, anchor_clauses=[self._person_age_equals_clause(5)]
+                    )
+                ],
+                "aggregations": [],
+                "relationship": None,
+            }
+        )
+        self.assertEqual(result, {PERSON_C_ID, PERSON_D_ID})
 
     # --- ALL→ANY conversion for single-hop inverse relationships ---
 

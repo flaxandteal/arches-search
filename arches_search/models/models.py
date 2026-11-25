@@ -13,9 +13,31 @@ from django.contrib.postgres.search import SearchVector
 from django.conf import settings
 
 
-class AdvancedSearchFacet(models.Model):
+class SearchFacet(models.Model):
+    """
+    An operator, and how it compiles to an ORM predicate.
+
+    Shared by the concrete facet models: AdvancedSearchFacet, which targets tile
+    values and is keyed by datatype, and ResourceFieldFacet, which targets a
+    column on the resource itself and is keyed by Django field class. Both are
+    consumed the same way, since PredicateBuilder only reads what is declared
+    here.
+    """
+
     id = models.AutoField(primary_key=True)
+    label = I18n_TextField()
+    operator = models.CharField(max_length=50)
     arity = models.PositiveSmallIntegerField(default=0)
+    param_formats = models.JSONField(default=list, blank=True)
+    orm_template = models.CharField(max_length=255, blank=True)
+    is_orm_template_negated = models.BooleanField(default=False)
+    sortorder = models.PositiveSmallIntegerField()
+
+    class Meta:
+        abstract = True
+
+
+class AdvancedSearchFacet(SearchFacet):
     datatype = models.ForeignKey(
         "models.DDataType",
         on_delete=models.CASCADE,
@@ -23,12 +45,6 @@ class AdvancedSearchFacet(models.Model):
         verbose_name=_("Data Type"),
         help_text=_("The data type to which the advanced search facet applies."),
     )
-    label = I18n_TextField()
-    operator = models.CharField(max_length=50)
-    param_formats = models.JSONField(default=list, blank=True)
-    sortorder = models.PositiveSmallIntegerField()
-    orm_template = models.CharField(max_length=255, blank=True)
-    is_orm_template_negated = models.BooleanField(default=False)
     filter_field = models.CharField(
         max_length=100,
         blank=True,
@@ -88,26 +104,124 @@ class AdvancedSearchFacet(models.Model):
             return None
         return self.target_search_model.model_class()
 
-    def filter_rows(self, rows, resolved_language):
-        if not self.filter_field or resolved_language is None:
+    def filter_rows(self, rows, resolved_filter_value):
+        if not self.filter_field or resolved_filter_value is None:
             return rows
-        return rows.filter(**{self.filter_field: resolved_language})
+        return rows.filter(**{self.filter_field: resolved_filter_value})
+
+
+class ResourceFieldFacet(SearchFacet):
+    field_class = models.CharField(
+        max_length=255,
+        verbose_name=_("Field Class"),
+        help_text=_(
+            "Dotted path of the Django model field class this facet applies to, "
+            "e.g. 'django.db.models.BooleanField'. Matched by isinstance, so a "
+            "more specific class takes precedence over its base."
+        ),
+    )
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["field_class", "operator"],
+                name="unique_operator_per_field_class",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.field_class}: {self.operator}"
+
+
+class AdvancedSearchOperandComponent(models.Model):
+    id = models.AutoField(primary_key=True)
+    datatype = models.OneToOneField(
+        "models.DDataType",
+        on_delete=models.CASCADE,
+        db_column="datatypeid",
+        verbose_name=_("Data Type"),
+        help_text=_(
+            "The data type whose values this component edits in the advanced "
+            "search builder. Data types without one are edited inline with "
+            "their node's widget."
+        ),
+    )
+    slug = models.CharField(
+        max_length=50,
+        verbose_name=_("Slug"),
+        help_text=_(
+            "Shared by data types whose values are edited the same way, "
+            "e.g. date and edtf."
+        ),
+    )
+    label = I18n_TextField(verbose_name=_("Label"))
+    icon = models.CharField(max_length=100, verbose_name=_("Icon"))
+    component = models.CharField(
+        max_length=255,
+        verbose_name=_("Component"),
+        help_text=_(
+            "Path of the Vue component that edits the value in the side "
+            "panel, relative to the frontend source root."
+        ),
+    )
+    sets_operator = models.BooleanField(
+        default=False,
+        verbose_name=_("Sets operator"),
+        help_text=_(
+            "Whether the component chooses the operator itself, so the "
+            "builder does not show its own operator select."
+        ),
+    )
+
+    def serialize(self, fields=None, exclude=None, **kwargs):
+        return {
+            "datatype_id": self.datatype_id,
+            "slug": self.slug,
+            "label": self.label,
+            "icon": self.icon,
+            "component": self.component,
+            "sets_operator": self.sets_operator,
+        }
+
+    def __str__(self):
+        return f"{self.datatype_id}: {self.component}"
+
+
+def _get_operand_normalizer(datatype_name):
+    from arches_search.utils.advanced_search.operand_normalization.operand_normalizer_factory import (
+        OperandNormalizerFactory,
+    )
+
+    return OperandNormalizerFactory().get_normalizer(datatype_name)
+
+
+def _normalize_operands_via_factory(operand_items, datatype_name):
+    normalizer = _get_operand_normalizer(datatype_name)
+    return [
+        {**operand_item, "value": normalizer.normalize_value(operand_item)}
+        for operand_item in operand_items
+    ]
 
 
 class TermSearch(models.Model):
     id = models.AutoField(primary_key=True)
     tileid = models.ForeignKey(
-        "models.Tile", on_delete=models.CASCADE, db_column="tileid"
+        "models.Tile",
+        on_delete=models.CASCADE,
+        db_column="tileid",
+        db_index=False,
     )
     resourceinstanceid = models.ForeignKey(
         "models.ResourceInstance",
         on_delete=models.CASCADE,
         db_column="resourceinstanceid",
+        db_index=False,
     )
     graph_slug = models.TextField()
     node_alias = models.TextField()
     language = models.TextField()
     datatype = models.TextField()
+    valuetype = models.TextField(default="")
     value = models.TextField()
     search_vector = models.GeneratedField(
         null=True,
@@ -123,39 +237,23 @@ class TermSearch(models.Model):
     )
 
     @classmethod
-    def normalize_operands(cls, operand_items):
-        active_language_code = get_language()
-        short_language_code = (
-            active_language_code.split("-")[0] if active_language_code else None
-        )
+    def normalize_operands(cls, operand_items, *, datatype_name):
+        normalizer = _get_operand_normalizer(datatype_name)
+
         normalized_items = []
-        resolved_language = None
+        resolved_filter_value = None
         for operand_item in operand_items:
-            raw_value = operand_item.get("value")
-            if isinstance(raw_value, dict) and raw_value:
-                if active_language_code and active_language_code in raw_value:
-                    chosen_language = active_language_code
-                elif short_language_code and short_language_code in raw_value:
-                    chosen_language = short_language_code
-                else:
-                    chosen_language = next(iter(raw_value))
+            item_filter_value = normalizer.resolve_filter_value(operand_item)
+            if item_filter_value is not None:
+                if resolved_filter_value is None:
+                    resolved_filter_value = item_filter_value
+                elif item_filter_value != resolved_filter_value:
+                    raise ValueError("Operands resolved to different filter values")
+            normalized_items.append(
+                {**operand_item, "value": normalizer.normalize_value(operand_item)}
+            )
 
-                if resolved_language is None:
-                    resolved_language = chosen_language
-                elif chosen_language != resolved_language:
-                    raise ValueError(
-                        "Localized string operands resolved to different languages"
-                    )
-
-                language_value = raw_value[chosen_language]
-
-                if isinstance(language_value, dict) and "value" in language_value:
-                    language_value = language_value["value"]
-                normalized_items.append({**operand_item, "value": language_value})
-
-            else:
-                normalized_items.append(operand_item)
-        return normalized_items, resolved_language
+        return normalized_items, resolved_filter_value
 
     class Meta:
         managed = True
@@ -206,17 +304,25 @@ class TermSearch(models.Model):
 class NumericSearch(models.Model):
     id = models.AutoField(primary_key=True)
     tileid = models.ForeignKey(
-        "models.Tile", on_delete=models.CASCADE, db_column="tileid"
+        "models.Tile",
+        on_delete=models.CASCADE,
+        db_column="tileid",
+        db_index=False,
     )
     resourceinstanceid = models.ForeignKey(
         "models.ResourceInstance",
         on_delete=models.CASCADE,
         db_column="resourceinstanceid",
+        db_index=False,
     )
     graph_slug = models.TextField()
     node_alias = models.TextField()
     datatype = models.TextField()
     value = models.DecimalField(decimal_places=10, max_digits=64)
+
+    @classmethod
+    def normalize_operands(cls, operand_items, *, datatype_name):
+        return _normalize_operands_via_factory(operand_items, datatype_name), None
 
     class Meta:
         managed = True
@@ -239,12 +345,16 @@ class NumericSearch(models.Model):
 class UUIDSearch(models.Model):
     id = models.AutoField(primary_key=True)
     tileid = models.ForeignKey(
-        "models.Tile", on_delete=models.CASCADE, db_column="tileid"
+        "models.Tile",
+        on_delete=models.CASCADE,
+        db_column="tileid",
+        db_index=False,
     )
     resourceinstanceid = models.ForeignKey(
         "models.ResourceInstance",
         on_delete=models.CASCADE,
         db_column="resourceinstanceid",
+        db_index=False,
     )
     graph_slug = models.TextField()
     node_alias = models.TextField()
@@ -268,16 +378,24 @@ class UUIDSearch(models.Model):
             models.Index(fields=["graph_slug", "node_alias", "tileid", "value"]),
         ]
 
+    @classmethod
+    def normalize_operands(cls, operand_items, *, datatype_name):
+        return _normalize_operands_via_factory(operand_items, datatype_name), None
+
 
 class DateSearch(models.Model):
     id = models.AutoField(primary_key=True)
     tileid = models.ForeignKey(
-        "models.Tile", on_delete=models.CASCADE, db_column="tileid"
+        "models.Tile",
+        on_delete=models.CASCADE,
+        db_column="tileid",
+        db_index=False,
     )
     resourceinstanceid = models.ForeignKey(
         "models.ResourceInstance",
         on_delete=models.CASCADE,
         db_column="resourceinstanceid",
+        db_index=False,
     )
     graph_slug = models.TextField()
     node_alias = models.TextField()
@@ -302,33 +420,23 @@ class DateSearch(models.Model):
         ]
 
     @classmethod
-    def normalize_operands(cls, operand_items):
-        from arches.app.utils.date_utils import ExtendedDateFormat
-
-        edtf = ExtendedDateFormat()
-        normalized_items = []
-        for operand_item in operand_items:
-            raw_value = operand_item.get("value")
-            if isinstance(raw_value, str) and raw_value.count("-") == 2:
-                year_str, month_str, day_str = raw_value.split("-")
-                sortable_value = edtf.to_sortable_date(
-                    int(year_str), int(month_str), int(day_str)
-                )
-                normalized_items.append({**operand_item, "value": sortable_value})
-            else:
-                normalized_items.append(operand_item)
-        return normalized_items, None
+    def normalize_operands(cls, operand_items, *, datatype_name):
+        return _normalize_operands_via_factory(operand_items, datatype_name), None
 
 
 class DateRangeSearch(models.Model):
     id = models.AutoField(primary_key=True)
     tileid = models.ForeignKey(
-        "models.Tile", on_delete=models.CASCADE, db_column="tileid"
+        "models.Tile",
+        on_delete=models.CASCADE,
+        db_column="tileid",
+        db_index=False,
     )
     resourceinstanceid = models.ForeignKey(
         "models.ResourceInstance",
         on_delete=models.CASCADE,
         db_column="resourceinstanceid",
+        db_index=False,
     )
     graph_slug = models.TextField()
     node_alias = models.TextField()
@@ -360,6 +468,7 @@ class DateRangeSearch(models.Model):
                     "end_value",
                 ]
             ),
+            models.Index(fields=["graph_slug", "node_alias", "end_value"]),
         ]
 
     normalize_operands = DateSearch.normalize_operands
@@ -368,17 +477,25 @@ class DateRangeSearch(models.Model):
 class BooleanSearch(models.Model):
     id = models.AutoField(primary_key=True)
     tileid = models.ForeignKey(
-        "models.Tile", on_delete=models.CASCADE, db_column="tileid"
+        "models.Tile",
+        on_delete=models.CASCADE,
+        db_column="tileid",
+        db_index=False,
     )
     resourceinstanceid = models.ForeignKey(
         "models.ResourceInstance",
         on_delete=models.CASCADE,
         db_column="resourceinstanceid",
+        db_index=False,
     )
     graph_slug = models.TextField()
     node_alias = models.TextField()
     datatype = models.TextField()
     value = models.BooleanField()
+
+    @classmethod
+    def normalize_operands(cls, operand_items, *, datatype_name):
+        return _normalize_operands_via_factory(operand_items, datatype_name), None
 
     class Meta:
         managed = True
@@ -401,17 +518,25 @@ class BooleanSearch(models.Model):
 class GeometrySearch(models.Model):
     id = models.AutoField(primary_key=True)
     tileid = models.ForeignKey(
-        "models.Tile", on_delete=models.CASCADE, db_column="tileid"
+        "models.Tile",
+        on_delete=models.CASCADE,
+        db_column="tileid",
+        db_index=False,
     )
     resourceinstanceid = models.ForeignKey(
         "models.ResourceInstance",
         on_delete=models.CASCADE,
         db_column="resourceinstanceid",
+        db_index=False,
     )
     graph_slug = models.TextField()
     node_alias = models.TextField()
     datatype = models.TextField()
     geom = GeometryField(srid=4326, spatial_index=False)
+
+    @classmethod
+    def normalize_operands(cls, operand_items, *, datatype_name):
+        return _normalize_operands_via_factory(operand_items, datatype_name), None
 
     class Meta:
         managed = True
@@ -434,12 +559,16 @@ class GeometrySearch(models.Model):
 class FileListSearch(models.Model):
     id = models.AutoField(primary_key=True)
     tileid = models.ForeignKey(
-        "models.Tile", on_delete=models.CASCADE, db_column="tileid"
+        "models.Tile",
+        on_delete=models.CASCADE,
+        db_column="tileid",
+        db_index=False,
     )
     resourceinstanceid = models.ForeignKey(
         "models.ResourceInstance",
         on_delete=models.CASCADE,
         db_column="resourceinstanceid",
+        db_index=False,
     )
     graph_slug = models.TextField()
     node_alias = models.TextField()
@@ -448,6 +577,10 @@ class FileListSearch(models.Model):
     extension = models.TextField(null=True, blank=True)
     file_size = models.BigIntegerField(null=True, blank=True)
     modified_at = models.FloatField(null=True, blank=True)
+
+    @classmethod
+    def normalize_operands(cls, operand_items, *, datatype_name):
+        return _normalize_operands_via_factory(operand_items, datatype_name), None
 
     class Meta:
         managed = True

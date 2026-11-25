@@ -1,0 +1,164 @@
+<script setup lang="ts">
+import { ref } from "vue";
+import { useGettext } from "vue3-gettext";
+
+import Accordion from "openvue/accordion";
+import AccordionPanel from "openvue/accordionpanel";
+import AccordionHeader from "openvue/accordionheader";
+import AccordionContent from "openvue/accordioncontent";
+import Button from "openvue/button";
+
+import { getAttributeFilterEntry } from "@/arches_search/SimpleSearch/components/attribute-filters/registry.ts";
+
+import type { Component } from "vue";
+import type { NodeFilterConfigNode } from "@/arches_search/SimpleSearch/types.ts";
+
+const { $gettext } = useGettext();
+
+defineProps<{
+    nodes: NodeFilterConfigNode[];
+    values: Record<string, unknown>;
+}>();
+
+const emit = defineEmits<{
+    (event: "update:value", nodeAlias: string, value: unknown): void;
+    (event: "close"): void;
+}>();
+
+const expandedPanels = ref<string[]>([]);
+
+function componentFor(node: NodeFilterConfigNode): Component | null {
+    return getAttributeFilterEntry(node.datatype)?.component ?? null;
+}
+</script>
+
+<template>
+    <div class="attribute-filters">
+        <div class="attribute-filters-header">
+            <h3 class="attribute-filters-title">
+                <i class="pi pi-filter" />
+                {{ $gettext("Attribute Filters") }}
+            </h3>
+            <Button
+                :label="$gettext('Close')"
+                icon="pi pi-times"
+                icon-pos="left"
+                :text="true"
+                class="attribute-filters-close-btn"
+                @click="emit('close')"
+            />
+        </div>
+
+        <span
+            v-if="nodes.length === 0"
+            class="attribute-filters-empty-state"
+        >
+            {{
+                $gettext(
+                    "No filters have been configured for this resource type.",
+                )
+            }}
+        </span>
+
+        <Accordion
+            v-else
+            v-model:value="expandedPanels"
+            :multiple="true"
+            :lazy="true"
+        >
+            <AccordionPanel
+                v-for="node in nodes"
+                :key="node.node_alias"
+                :value="node.node_alias"
+            >
+                <AccordionHeader>{{ node.label }}</AccordionHeader>
+                <AccordionContent>
+                    <component
+                        :is="componentFor(node)"
+                        v-if="componentFor(node)"
+                        :node="node"
+                        :model-value="values[node.node_alias] ?? null"
+                        @update:model-value="
+                            emit('update:value', node.node_alias, $event)
+                        "
+                    />
+                    <div
+                        v-else
+                        class="unsupported"
+                    >
+                        {{
+                            $gettext(
+                                "Filtering is not supported for this field yet.",
+                            )
+                        }}
+                    </div>
+                </AccordionContent>
+            </AccordionPanel>
+        </Accordion>
+    </div>
+</template>
+
+<style scoped>
+.attribute-filters {
+    height: 100%;
+    overflow-y: auto;
+    padding: 2rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.6rem;
+}
+
+.attribute-filters :deep(.p-accordioncontent-wrapper) {
+    min-inline-size: 0;
+}
+
+.attribute-filters-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 0.75rem;
+    border-bottom: 0.125rem solid var(--p-content-border-color);
+}
+
+.attribute-filters-title {
+    margin: 0;
+    font-weight: 700;
+    font-size: 1.5rem;
+    color: var(--p-text-color);
+}
+
+.attribute-filters-title .pi {
+    margin-inline-end: 0.6rem;
+    color: var(--p-primary-color);
+}
+
+.attribute-filters-close-btn {
+    padding: 0.3rem 0.8rem;
+    font-size: 1.2rem;
+    font-weight: 500;
+    color: var(--p-text-muted-color);
+    border-radius: 0.4rem;
+}
+
+.attribute-filters-close-btn:hover {
+    background: var(--p-content-hover-background);
+    color: var(--p-text-color);
+}
+
+.attribute-filters-empty-state {
+    display: block;
+    padding: 1rem;
+    border: 0.125rem solid var(--p-content-border-color);
+    border-radius: 0.5rem;
+    font-size: 1rem;
+    color: var(--p-text-muted-color);
+    line-height: 1.5;
+}
+
+.unsupported {
+    font-size: 1.3rem;
+    color: var(--p-text-muted-color);
+    padding: 0.4rem 0 0.8rem 0;
+    line-height: 1.5;
+}
+</style>

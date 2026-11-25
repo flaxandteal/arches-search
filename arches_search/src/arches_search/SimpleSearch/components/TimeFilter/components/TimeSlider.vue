@@ -2,13 +2,16 @@
 import dayjs from "dayjs";
 import { computed } from "vue";
 
-import Slider from "primevue/slider";
+import Slider from "openvue/slider";
+
+import { HISTORICAL_CUTOFF_YEAR } from "@/arches_search/SimpleSearch/components/TimeFilter/constants.ts";
 
 const LABEL_OVERLAP_THRESHOLD = 25;
 
-const props = defineProps<{
+const { modelValue, bounds } = defineProps<{
     modelValue: [number, number];
     bounds: [Date, Date];
+    disabled?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -16,31 +19,27 @@ const emit = defineEmits<{
 }>();
 
 const totalDays = computed<number>(() => {
-    const days = dayjs(props.bounds[1]).diff(props.bounds[0], "day");
+    const days = dayjs(bounds[1]).diff(bounds[0], "day");
     return Math.max(days, 0);
 });
 
 const handleStartDate = computed<Date>(() =>
-    dayjs(props.bounds[0]).add(props.modelValue[0], "day").toDate(),
+    dayjs(bounds[0]).add(modelValue[0], "day").toDate(),
 );
 
 const handleEndDate = computed<Date>(() =>
-    dayjs(props.bounds[0]).add(props.modelValue[1], "day").toDate(),
+    dayjs(bounds[0]).add(modelValue[1], "day").toDate(),
 );
 
-const boundsStartLabel = computed<string>(() => formatDate(props.bounds[0]));
-const boundsEndLabel = computed<string>(() => formatDate(props.bounds[1]));
+const boundsStartLabel = computed<string>(() => formatYear(bounds[0]));
+const boundsEndLabel = computed<string>(() => formatYear(bounds[1]));
 const handleStartLabel = computed<string>(() =>
-    formatDate(handleStartDate.value),
+    formatYear(handleStartDate.value),
 );
-const handleEndLabel = computed<string>(() => formatDate(handleEndDate.value));
+const handleEndLabel = computed<string>(() => formatYear(handleEndDate.value));
 
-const handleStartPercent = computed<number>(() =>
-    percentFor(props.modelValue[0], 0),
-);
-const handleEndPercent = computed<number>(() =>
-    percentFor(props.modelValue[1], 100),
-);
+const handleStartPercent = computed<number>(() => percentFor(modelValue[0], 0));
+const handleEndPercent = computed<number>(() => percentFor(modelValue[1], 100));
 
 const labelsOverlap = computed<boolean>(() => {
     const labelDistance = Math.abs(
@@ -55,8 +54,8 @@ const combinedLabelPercent = computed<number>(
 );
 
 const combinedLabel = computed<string>(() => {
-    const startLabel = formatDate(handleStartDate.value);
-    const endLabel = formatDate(handleEndDate.value);
+    const startLabel = formatYear(handleStartDate.value);
+    const endLabel = formatYear(handleEndDate.value);
 
     if (dayjs(handleStartDate.value).isSame(handleEndDate.value, "day")) {
         return startLabel;
@@ -65,8 +64,15 @@ const combinedLabel = computed<string>(() => {
     return `${startLabel} – ${endLabel}`;
 });
 
-function formatDate(date: Date): string {
-    return dayjs(date).format("MMM D, YYYY");
+function formatYear(date: Date): string {
+    const year = date.getFullYear();
+
+    if (year >= HISTORICAL_CUTOFF_YEAR) {
+        return dayjs(date).format("YYYY-MM-DD");
+    }
+
+    // ISO 8601: year 0 = 1 BCE, year -1 = 2 BCE, so BCE display = 1 - year
+    return year <= 0 ? `${1 - year} BCE` : String(year);
 }
 
 function percentFor(value: number, fallback: number): number {
@@ -113,7 +119,8 @@ function onSliderUpdate(value: number | number[]): void {
                 :max="totalDays"
                 :step="1"
                 :range="true"
-                @update:model-value="onSliderUpdate"
+                :disabled="disabled"
+                @change="onSliderUpdate"
             />
         </div>
 
@@ -204,6 +211,9 @@ function onSliderUpdate(value: number | number[]): void {
     position: relative;
     z-index: 1;
     width: 100%;
+    --p-slider-range-background: var(--p-primary-color);
+    --p-slider-handle-background: var(--p-primary-color);
+    --p-slider-handle-hover-background: var(--p-primary-hover-color);
 }
 
 .time-slider-label-track {

@@ -2,42 +2,53 @@
 import { computed } from "vue";
 import { useGettext } from "vue3-gettext";
 
-import Button from "primevue/button";
-import Chip from "primevue/chip";
-
-import { useSearchFilters } from "@/arches_search/SimpleSearch/composables/useSearchFilters.ts";
+import Button from "openvue/button";
 
 import type { ActiveFilter } from "@/arches_search/SimpleSearch/types.ts";
 
 const CLEAR_ALL_EVENT = "clear-all" as const;
+
+const { activeFilters } = defineProps<{
+    activeFilters: ActiveFilter[];
+}>();
 
 const emit = defineEmits<{
     (event: typeof CLEAR_ALL_EVENT): void;
 }>();
 
 const { $gettext } = useGettext();
-const { activeFilters, resultsGraph, searchResults } = useSearchFilters();
 
-const hasActiveFilters = computed(() => activeFilters.value.length > 0);
-const totalResults = computed(
-    () => searchResults.value.pagination?.total_results ?? 0,
-);
-const resourceTypeLabel = computed(
-    () => resultsGraph.value?.label ?? $gettext("Items"),
-);
-const resultsCountText = computed(() =>
-    $gettext("%{totalResults} %{resourceType} match", {
-        totalResults: String(totalResults.value),
-        resourceType: resourceTypeLabel.value,
-    }),
-);
+const hasActiveFilters = computed(() => activeFilters.length > 0);
+
+function editTitle(activeFilter: ActiveFilter): string | undefined {
+    if (activeFilter.inactiveNote) {
+        return activeFilter.inactiveNote;
+    }
+    if (!activeFilter.onEdit) {
+        return undefined;
+    }
+
+    return $gettext("Click to edit %{category} filter", {
+        category: activeFilter.category,
+    });
+}
+
+function removeLabel(activeFilter: ActiveFilter): string {
+    return $gettext("Remove %{category} filter", {
+        category: activeFilter.category,
+    });
+}
+
+function onChipClick(activeFilter: ActiveFilter): void {
+    activeFilter.onEdit?.();
+}
 
 function clearFilter(activeFilter: ActiveFilter): void {
     activeFilter.clear();
 }
 
 function clearAllFilters(): void {
-    for (const activeFilter of activeFilters.value) {
+    for (const activeFilter of activeFilters) {
         clearFilter(activeFilter);
     }
 
@@ -46,28 +57,47 @@ function clearAllFilters(): void {
 </script>
 
 <template>
-    <div class="active-filters">
-        <span class="results-count">
-            {{ resultsCountText }}
-        </span>
-
-        <div
-            v-if="hasActiveFilters"
-            class="filter-chips"
-        >
-            <Chip
-                v-for="activeFilter in activeFilters"
-                :key="activeFilter.id"
-                class="filter-chip"
-                :label="activeFilter.text"
-                :removable="true"
-                :style="activeFilter.options?.style"
-                @remove="clearFilter(activeFilter)"
-            />
-        </div>
+    <div
+        v-if="hasActiveFilters"
+        class="active-filters"
+    >
+        <span class="filter-tag-label">{{ $gettext("Filters:") }}</span>
 
         <Button
-            v-if="hasActiveFilters"
+            v-for="activeFilter in activeFilters"
+            :key="activeFilter.id"
+            class="filter-chip"
+            :text="true"
+            :class="[
+                'filter-chip-' + activeFilter.kind,
+                { 'filter-chip-editable': activeFilter.onEdit != null },
+                { 'filter-chip-inactive': activeFilter.inactiveNote },
+            ]"
+            :title="editTitle(activeFilter)"
+            @click="onChipClick(activeFilter)"
+        >
+            <span class="fc-body">
+                <i :class="[activeFilter.icon, 'fc-icon']" />
+                <span class="fc-category">{{ activeFilter.category }}</span>
+                <span class="fc-sep">·</span>
+                <span class="fc-value">{{ activeFilter.text }}</span>
+                <span
+                    v-if="activeFilter.inactiveNote"
+                    class="fc-inactive"
+                >
+                    {{ $gettext("not applied") }}
+                </span>
+            </span>
+            <span
+                class="fc-dismiss"
+                :aria-label="removeLabel(activeFilter)"
+                @click.stop="clearFilter(activeFilter)"
+            >
+                <i class="pi pi-times" />
+            </span>
+        </Button>
+
+        <Button
             class="clear-all-button"
             type="button"
             variant="text"
@@ -82,27 +112,154 @@ function clearAllFilters(): void {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 0.8rem;
-    padding: 0.8rem 1.6rem;
-    border-bottom: 0.125rem solid var(--p-content-border-color);
+    gap: 0.6rem;
+    padding: 0.8rem 2.4rem;
+    border-block-start: 0.1rem solid var(--p-content-border-color);
+    min-height: 4.4rem;
 }
 
-.active-filters .results-count {
-    font-weight: 600;
+.filter-tag-label {
+    font-size: 1.1rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.055rem;
+    color: var(--p-text-muted-color);
     white-space: nowrap;
 }
 
-.active-filters .filter-chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.6rem;
-}
-
-.active-filters .filter-chip {
-    border-radius: 0.4rem;
-}
-
-.active-filters .clear-all-button {
+.filter-chip {
+    display: inline-flex;
+    align-items: center;
+    border-radius: var(--arches-search-radius-pill);
+    font-size: 1.2rem;
+    font-weight: 500;
+    border: 0.15rem solid transparent;
+    cursor: default;
+    user-select: none;
+    background: transparent;
     padding: 0;
+    overflow: hidden;
+    transition: box-shadow 0.12s;
+}
+
+.filter-chip-editable {
+    cursor: pointer;
+}
+
+.filter-chip-editable:hover {
+    box-shadow: var(--arches-search-chip-hover-shadow);
+}
+
+.filter-chip:focus-visible {
+    outline: 0.2rem solid var(--p-primary-color);
+    outline-offset: 0.2rem;
+}
+
+.fc-body {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.8rem 0.4rem 1rem;
+    font-size: 1.2rem;
+    font-weight: 500;
+    line-height: 1;
+}
+
+.fc-icon {
+    font-size: 1rem;
+    flex-shrink: 0;
+}
+
+.fc-category {
+    font-size: 1rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04rem;
+    opacity: 0.7;
+}
+
+.fc-sep {
+    opacity: 0.4;
+    margin: 0 0.1rem;
+}
+
+.fc-value {
+    font-weight: 600;
+}
+
+.fc-dismiss {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.4rem 0.8rem 0.4rem 0.4rem;
+    font-size: 1rem;
+    opacity: 0.6;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    color: inherit;
+    transition: opacity 0.12s;
+}
+
+.fc-dismiss:hover {
+    opacity: 1;
+}
+
+.filter-chip-term {
+    background: var(--arches-search-chip-search-bg);
+    border-color: var(--arches-search-chip-search-border);
+    color: var(--arches-search-chip-search-text);
+}
+
+.filter-chip-resource-type {
+    background: var(--arches-search-filter-resource-type-bg);
+    border-color: var(--arches-search-filter-resource-type-border);
+    color: var(--arches-search-filter-resource-type-text);
+}
+
+.filter-chip-time {
+    background: var(--arches-search-filter-time-bg);
+    border-color: var(--arches-search-filter-time-border);
+    color: var(--arches-search-filter-time-text);
+}
+
+.filter-chip-map {
+    background: var(--arches-search-filter-map-bg);
+    border-color: var(--arches-search-filter-map-border);
+    color: var(--arches-search-filter-map-text);
+}
+
+.filter-chip-attribute {
+    background: var(--arches-search-filter-attribute-bg);
+    border-color: var(--arches-search-filter-attribute-border);
+    color: var(--arches-search-filter-attribute-text);
+}
+
+.filter-chip-controlled-term {
+    background: var(--arches-search-filter-controlled-term-bg);
+    border-color: var(--arches-search-filter-controlled-term-border);
+    color: var(--arches-search-filter-controlled-term-text);
+}
+
+.filter-chip-record {
+    background: var(--arches-search-filter-record-bg);
+    border-color: var(--arches-search-filter-record-border);
+    color: var(--arches-search-filter-record-text);
+}
+
+.filter-chip.filter-chip-inactive {
+    opacity: 0.55;
+}
+
+.filter-chip-inactive .fc-inactive {
+    font-style: italic;
+}
+
+.clear-all-button {
+    padding: 0;
+    margin-inline-start: 0.6rem;
+    font-size: 1.1rem;
+    color: var(--p-primary-color);
+    text-decoration: underline;
 }
 </style>

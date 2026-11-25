@@ -14,22 +14,22 @@ import uuid
 from django.test import TestCase
 
 from arches.app.models.models import (
+    Concept,
+    EditLog,
     GraphModel,
     Node,
     NodeGroup,
     ResourceInstance,
     TileModel,
+    Value,
 )
 
+from arches_search.functions.search_indexing import SearchIndexingFunction
+from arches_search.indexing.index_descriptor import DESCRIPTOR_NODE_ALIAS
 from arches_search.indexing.index_from_tile import index_from_tile
 from arches_search.indexing.indexers.file_list import FileListIndexing
 from arches_search.indexing.indexers.string import StringIndexing
-from arches_search.models.models import FileListSearch, TermSearch
-
-
-# ---------------------------------------------------------------------------
-# Shared test fixture
-# ---------------------------------------------------------------------------
+from arches_search.models.models import FileListSearch, NumericSearch, TermSearch
 
 
 class IndexingTestCase(TestCase):
@@ -119,9 +119,139 @@ class IndexingTestCase(TestCase):
         return localized_value
 
 
-# ---------------------------------------------------------------------------
-# Long string tests
-# ---------------------------------------------------------------------------
+class ReferenceIndexingTests(IndexingTestCase):
+    """
+    A reference indexes a row per label, each claiming the language and kind
+    that label declares -- what an ordering asks for when it wants the
+    prefLabel a user reads in their own language.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.reference_node = Node.objects.create(
+            nodeid=uuid.uuid4(),
+            name="test_reference_node",
+            alias="test_reference_node",
+            datatype="reference",
+            graph=cls.graph,
+            nodegroup=cls.nodegroup,
+            istopnode=False,
+        )
+
+    def test_a_row_per_label_carries_its_language_and_kind(self):
+        list_item_id = str(uuid.uuid4())
+        tile = self._make_tile(
+            self.reference_node,
+            [
+                {
+                    "uri": "https://archesproject.org/item",
+                    "labels": [
+                        {
+                            "id": str(uuid.uuid4()),
+                            "value": "Site",
+                            "language_id": "en",
+                            "valuetype_id": "prefLabel",
+                            "list_item_id": list_item_id,
+                        },
+                        {
+                            "id": str(uuid.uuid4()),
+                            "value": "Archaeological Site",
+                            "language_id": "en",
+                            "valuetype_id": "altLabel",
+                            "list_item_id": list_item_id,
+                        },
+                        {
+                            "id": str(uuid.uuid4()),
+                            "value": "Site archéologique",
+                            "language_id": "fr",
+                            "valuetype_id": "prefLabel",
+                            "list_item_id": list_item_id,
+                        },
+                    ],
+                    "list_id": str(uuid.uuid4()),
+                }
+            ],
+        )
+
+        for record in index_from_tile(tile):
+            record.save()
+
+        indexed = {
+            (row.language, row.valuetype, row.value)
+            for row in TermSearch.objects.filter(tileid=tile.tileid)
+        }
+        self.assertEqual(
+            indexed,
+            {
+                ("en", "prefLabel", "Site"),
+                ("en", "altLabel", "Archaeological Site"),
+                ("fr", "prefLabel", "Site archéologique"),
+            },
+        )
+
+
+class ConceptIndexingTests(IndexingTestCase):
+    """
+    A concept value carries a language and a valuetype in the same vocabulary a
+    reference label uses, and both reach the index.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.concept_node = Node.objects.create(
+            nodeid=uuid.uuid4(),
+            name="test_concept_node",
+            alias="test_concept_node",
+            datatype="concept",
+            graph=cls.graph,
+            nodegroup=cls.nodegroup,
+            istopnode=False,
+        )
+        cls.concept = Concept.objects.create(
+            conceptid=uuid.uuid4(),
+            nodetype_id="Concept",
+            legacyoid=str(uuid.uuid4()),
+        )
+        cls.preferred_value = Value.objects.create(
+            valueid=uuid.uuid4(),
+            concept=cls.concept,
+            valuetype_id="prefLabel",
+            language_id="en",
+            value="Ceramic",
+        )
+        cls.alternate_value = Value.objects.create(
+            valueid=uuid.uuid4(),
+            concept=cls.concept,
+            valuetype_id="altLabel",
+            language_id="en",
+            value="Pottery",
+        )
+
+    def test_a_concept_row_keeps_its_language_and_valuetype(self):
+        tile = self._make_tile(self.concept_node, str(self.preferred_value.pk))
+
+        for record in index_from_tile(tile):
+            record.save()
+
+        indexed = [
+            (row.language, row.valuetype, row.value)
+            for row in TermSearch.objects.filter(tileid=tile.tileid)
+        ]
+        self.assertEqual(indexed, [("en", "prefLabel", "Ceramic")])
+
+    def test_an_alternate_label_is_indexed_as_one(self):
+        tile = self._make_tile(self.concept_node, str(self.alternate_value.pk))
+
+        for record in index_from_tile(tile):
+            record.save()
+
+        indexed = [
+            (row.language, row.valuetype, row.value)
+            for row in TermSearch.objects.filter(tileid=tile.tileid)
+        ]
+        self.assertEqual(indexed, [("en", "altLabel", "Pottery")])
 
 
 class LongStringIndexingTests(IndexingTestCase):
@@ -158,11 +288,6 @@ class LongStringIndexingTests(IndexingTestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0].language, "en")
         self.assertEqual(result[0].value, "REX")
-
-
-# ---------------------------------------------------------------------------
-# File-list indexing tests
-# ---------------------------------------------------------------------------
 
 
 class FileListIndexingTests(IndexingTestCase):
@@ -226,11 +351,6 @@ class FileListIndexingTests(IndexingTestCase):
                 },
             ],
         )
-
-
-# ---------------------------------------------------------------------------
-# All-datatypes null test
-# ---------------------------------------------------------------------------
 
 
 class AllDatatypesNullIndexingTest(IndexingTestCase):
@@ -302,3 +422,73 @@ class AllDatatypesNullIndexingTest(IndexingTestCase):
                 f"{len(result)} record(s): {result}"
             ),
         )
+
+
+class PostImportIndexingTests(IndexingTestCase):
+    """
+    Bulk loads write tiles without calling Tile.save, so SearchIndexingFunction
+    reindexes every resource touched by the load's transaction in post_import.
+    """
+
+    def test_post_import_indexes_resources_in_transaction(self):
+        tile = self._make_tile(self.number_node, 42)
+        transaction_id = uuid.uuid4()
+        EditLog.objects.create(
+            resourceinstanceid=str(self.resource_instance.pk),
+            transactionid=transaction_id,
+            edittype="create",
+        )
+
+        SearchIndexingFunction().post_import(transaction_id)
+
+        rows = NumericSearch.objects.filter(tileid=tile.pk)
+        self.assertEqual([row.value for row in rows], [42])
+
+    def test_post_import_replaces_stale_rows(self):
+        tile = self._make_tile(self.number_node, 1)
+        for record in index_from_tile(tile):
+            record.save()
+        tile.data = {str(self.number_node.nodeid): 2}
+        tile.save()
+        transaction_id = uuid.uuid4()
+        EditLog.objects.create(
+            resourceinstanceid=str(self.resource_instance.pk),
+            transactionid=transaction_id,
+            edittype="tile edit",
+        )
+
+        SearchIndexingFunction().post_import(transaction_id)
+
+        rows = NumericSearch.objects.filter(tileid=tile.pk)
+        self.assertEqual([row.value for row in rows], [2])
+
+    def test_post_import_indexes_the_descriptor(self):
+        self.resource_instance.descriptors = {"en": {"name": "HER-42"}}
+        self.resource_instance.save()
+        self._make_tile(self.number_node, 42)
+        transaction_id = uuid.uuid4()
+        EditLog.objects.create(
+            resourceinstanceid=str(self.resource_instance.pk),
+            transactionid=transaction_id,
+            edittype="create",
+        )
+
+        SearchIndexingFunction().post_import(transaction_id)
+
+        rows = TermSearch.objects.filter(
+            resourceinstanceid_id=self.resource_instance.pk,
+            node_alias=DESCRIPTOR_NODE_ALIAS,
+        )
+        self.assertEqual([row.value for row in rows], ["HER-42"])
+
+    def test_post_import_ignores_other_transactions(self):
+        tile = self._make_tile(self.number_node, 7)
+        EditLog.objects.create(
+            resourceinstanceid=str(self.resource_instance.pk),
+            transactionid=uuid.uuid4(),
+            edittype="create",
+        )
+
+        SearchIndexingFunction().post_import(uuid.uuid4())
+
+        self.assertFalse(NumericSearch.objects.filter(tileid=tile.pk).exists())

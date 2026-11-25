@@ -1,56 +1,81 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, ref, watch, watchEffect } from "vue";
 import { useGettext } from "vue3-gettext";
 
-import Skeleton from "primevue/skeleton";
-
-import arches from "arches";
+import Skeleton from "openvue/skeleton";
 
 import SearchResultCard from "@/arches_search/SearchResults/SearchResultCard.vue";
 
 import {
     fetchResourceDescriptors,
+    fetchResourceInstanceLifecycleStates,
     fetchSearchReportConfig,
 } from "@/arches_search/SearchResults/api.ts";
 
 import type {
     SearchResults,
     ResourceData,
+    GraphModel,
 } from "@/arches_search/AdvancedSearch/types.ts";
 import type {
     ResourceDescriptorData,
+    ResourceInstanceLifecycleState,
     SearchReportConfig,
 } from "@/arches_search/SearchResults/types.ts";
 
-const { $gettext } = useGettext();
+const REQUEST_PAGE_EVENT = "request-page" as const;
 
 const SCROLL_THRESHOLD_PIXELS = 72;
 
-const { results, isSearching, filterText } = defineProps<{
+const { results, isSearching, graphModels } = defineProps<{
     results: SearchResults;
     isSearching: boolean;
-    filterText: string;
+    graphModels: GraphModel[];
 }>();
 
 const emit = defineEmits<{
-    (event: "request-page", page: number): void;
+    (event: typeof REQUEST_PAGE_EVENT, page: number): void;
 }>();
+
+const { $gettext } = useGettext();
 
 const descriptorsByResourceId = ref<Record<string, ResourceDescriptorData>>({});
 const configsByGraphId = ref<Map<string, SearchReportConfig | null>>(new Map());
+const lifecycleStatesById = ref<Map<string, ResourceInstanceLifecycleState>>(
+    new Map(),
+);
 const isPageRequestInFlight = ref(false);
 
 const requestedDescriptorIds = new Set<string>();
 
-const visibleResources = computed<ResourceData[]>(() => {
-    if (!filterText) return results.resources;
-    const needle = filterText.toLowerCase();
-    return results.resources.filter((resource: ResourceData) => {
-        const name =
-            descriptorsByResourceId.value[resource.resourceinstanceid]
-                ?.descriptors?.[arches.activeLanguage]?.name ?? "";
-        return name.toLowerCase().includes(needle);
-    });
+const graphModelsByGraphId = computed<Map<string, GraphModel>>(
+    () =>
+        new Map(
+            graphModels.map((graphModel) => [graphModel.graphid, graphModel]),
+        ),
+);
+
+const endOfResultsText = computed<string>(() =>
+    $gettext("%{count} results", {
+        count: String(results.pagination.total_results),
+    }),
+);
+
+watchEffect(async () => {
+    try {
+        const lifecycleStates = await fetchResourceInstanceLifecycleStates();
+        lifecycleStatesById.value = new Map(
+            lifecycleStates.map((lifecycleState) => [
+                lifecycleState.id,
+                lifecycleState,
+            ]),
+        );
+    } catch (error) {
+        console.error(
+            "Failed to fetch resource instance lifecycle states:",
+            error,
+        );
+    }
 });
 
 watch(
@@ -133,7 +158,7 @@ function requestNextPage(): void {
     if (!results.pagination.has_next) return;
 
     isPageRequestInFlight.value = true;
-    emit("request-page", results.pagination.page + 1);
+    emit(REQUEST_PAGE_EVENT, results.pagination.page + 1);
 }
 
 function handleScroll(event: Event): void {
@@ -168,7 +193,7 @@ function handleScroll(event: Event): void {
             @scroll.passive="handleScroll"
         >
             <SearchResultCard
-                v-for="resource in visibleResources"
+                v-for="resource in results.resources"
                 :key="resource.resourceinstanceid"
                 :result="resource"
                 :descriptor-data="
@@ -178,7 +203,26 @@ function handleScroll(event: Event): void {
                     configsByGraphId.get(getGraphIdForResource(resource)) ??
                     null
                 "
+                :report-config-loaded="
+                    configsByGraphId.has(getGraphIdForResource(resource))
+                "
+                :graph-model="
+                    graphModelsByGraphId.get(getGraphIdForResource(resource)) ??
+                    null
+                "
+                :lifecycle-state="
+                    lifecycleStatesById.get(
+                        resource.resource_instance_lifecycle_state_id ?? '',
+                    ) ?? null
+                "
             />
+        </div>
+
+        <div
+            v-if="results.resources.length > 0"
+            class="search-results-footer"
+        >
+            — {{ endOfResultsText }} —
         </div>
     </div>
 </template>
@@ -194,13 +238,27 @@ function handleScroll(event: Event): void {
 }
 
 .search-results-empty {
-    margin: 5rem;
+    padding: 4rem 2.4rem;
+    text-align: center;
+    font-size: 1.4rem;
+    color: var(--p-text-muted-color);
 }
 
 .search-results-body {
     display: flex;
     flex-direction: column;
+    gap: 1rem;
     flex: 1;
+    padding: 1.6rem 2.4rem;
     overflow-y: auto;
+    min-height: 0;
+}
+
+.search-results-footer {
+    flex-shrink: 0;
+    text-align: center;
+    padding: 1.6rem 2.4rem;
+    font-size: 1.2rem;
+    color: var(--p-text-muted-color);
 }
 </style>

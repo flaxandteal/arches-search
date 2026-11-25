@@ -1,9 +1,10 @@
-import { generateArchesURL } from "@/arches/utils/generate-arches-url.ts";
+import { generateArchesURL } from "@/arches_vue_components/application";
 
 import arches from "arches";
 
 import type {
     ResourceDescriptorData,
+    ResourceInstanceLifecycleState,
     SearchReportConfig,
 } from "@/arches_search/SearchResults/types.ts";
 
@@ -24,6 +25,18 @@ export async function fetchResourceDescriptors(
         "?" +
         params.toString();
 
+    const response = await fetch(url);
+    const parsed = await response.json();
+    if (!response.ok) throw new Error(parsed.message || response.statusText);
+    return parsed;
+}
+
+export async function fetchResourceInstanceLifecycleStates(): Promise<
+    ResourceInstanceLifecycleState[]
+> {
+    const url = generateArchesURL(
+        "arches:api_resource_instance_lifecycle_states",
+    );
     const response = await fetch(url);
     const parsed = await response.json();
     if (!response.ok) throw new Error(parsed.message || response.statusText);

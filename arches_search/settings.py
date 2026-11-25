@@ -27,6 +27,7 @@ DATATYPE_LOCATIONS.append("arches_search.datatypes")
 FUNCTION_LOCATIONS.append("arches_search.functions")
 ETL_MODULE_LOCATIONS.append("arches_search.etl_modules")
 SEARCH_COMPONENT_LOCATIONS.append("arches_search.search_components")
+PERMISSION_FRAMEWORK = "arches_default_deny.ArchesDefaultDenyPermissionFramework"
 
 LOCALE_PATHS.insert(0, os.path.join(APP_ROOT, "locale"))
 
@@ -145,12 +146,12 @@ INSTALLED_APPS = (
     "django_celery_results",
     "django_migrate_sql",
     "pgtrigger",
-    # "silk",
-    "arches_search",  # Ensure the project is listed before any other arches applications
+    "arches_search",
+    "arches_resource_sets",
     "arches_modular_reports",
-    "arches_component_lab",
-    "arches_controlled_lists",
-    "arches_querysets",
+    "arches.extensions.querysets",
+    "arches.extensions.vue_components",
+    "arches.extensions.controlled_lists",
 )
 
 # Placing this last ensures any templates provided by Arches Applications
@@ -282,6 +283,18 @@ CACHES = {
         "BACKEND": "django.core.cache.backends.db.DatabaseCache",
         "LOCATION": "user_permission_cache",
     },
+    "querysets_concepts": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "querysets_concepts_cache",
+        "TIMEOUT": 86400,  # one day in seconds
+        "OPTIONS": {"MAX_ENTRIES": 1000},
+    },
+    "querysets_resource_instances": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "querysets_resource_instances_cache",
+        "TIMEOUT": 86400,  # one day in seconds
+        "OPTIONS": {"MAX_ENTRIES": 1000},
+    },
 }
 
 # Hide nodes and cards in a report that have no data
@@ -293,6 +306,8 @@ BYPASS_REQUIRED_VALUE_TILE_VALIDATION = False
 # Batch size for the arches_search `reindex_database` management command:
 # tiles are read and bulk-inserted in chunks of this size by each worker.
 INDEX_BATCH_SIZE = 2000
+
+TERM_SEARCH_MAX_HOPS = 2
 
 DATE_IMPORT_EXPORT_FORMAT = (
     "%Y-%m-%d"  # Custom date format for dates imported from and exported to csv
@@ -321,15 +336,6 @@ ENABLE_CAPTCHA = False
 # RECAPTCHA_USE_SSL = False
 NOCAPTCHA = True
 # RECAPTCHA_PROXY = 'http://127.0.0.1:8000'
-
-# EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'  #<-- Only need to uncomment this for testing without an actual email server
-# EMAIL_USE_TLS = True
-# EMAIL_HOST = 'smtp.gmail.com'
-EMAIL_HOST_USER = "xxxx@xxx.com"
-# EMAIL_HOST_PASSWORD = 'xxxxxxx'
-# EMAIL_PORT = 587
-
-DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
 
 CELERY_BROKER_URL = ""  # RabbitMQ --> "amqp://guest:guest@localhost",  Redis --> "redis://localhost:6379/0"
 CELERY_ACCEPT_CONTENT = ["json"]
